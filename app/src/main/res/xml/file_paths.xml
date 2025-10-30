@@ -1,0 +1,20 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- 🔒 RRv1.6 Copilot Guard (ID: RRv1_6_GUARD)
+     Do NOT change absolute ROI/GuideOverlay geometry, view IDs referenced by code,
+     or CSV-related assumptions. If unsure: STOP and ask. -->
+
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 既存の設定 -->
+    <external-files-path
+        name="my_images"
+        path="Pictures" />
+
+    <!-- 🔽 追加したい新しいパス -->
+    <external-files-path
+        name="external_files"
+        path="." />
+
+</paths>
+
+

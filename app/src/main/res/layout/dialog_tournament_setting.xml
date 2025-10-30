@@ -1,3 +1,6 @@
+﻿<!-- 🔒 RRv1.6 Copilot Guard (ID: RRv1_6_GUARD)
+     Do NOT change absolute ROI/GuideOverlay geometry, view IDs referenced by code,
+     or CSV-related assumptions. If unsure: STOP and ask. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:orientation="vertical"
     android:padding="24dp"

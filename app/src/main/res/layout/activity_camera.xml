@@ -1,0 +1,281 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- 🔒 RRv1.6 Copilot Guard (ID: RRv1_6_GUARD)
+     Do NOT change absolute ROI/GuideOverlay geometry, view IDs referenced by code,
+     or CSV-related assumptions. If unsure: STOP and ask. -->
+
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".CameraActivity">
+
+    <!-- プレビュー -->
+    <FrameLayout
+        android:id="@+id/previewContainer"
+        android:layout_width="match_parent"
+        android:layout_height="560dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <TextView
+            android:id="@+id/tournamentInfoText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="-"
+        android:textColor="#FFFFFF"
+        android:background="#88000000"
+        android:textSize="14sp"
+        android:padding="6dp"
+        android:layout_gravity="top|start"
+        android:layout_margin="12dp"
+        android:elevation="10dp" />
+
+
+        <!-- カメラプレビュー -->
+        <androidx.camera.view.PreviewView
+            android:id="@+id/previewView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- 右上：縦長の丸背景内にボタン3つ -->
+        <LinearLayout
+            android:id="@+id/buttonColumn"
+            android:layout_width="56dp"
+            android:layout_height="wrap_content"
+            android:minHeight="200dp"
+            android:orientation="vertical"
+            android:layout_gravity="top|end"
+            android:layout_margin="12dp"
+            android:background="@drawable/bg_icon_column"
+            android:paddingTop="16dp"
+            android:paddingBottom="16dp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:gravity="center">
+
+
+
+
+
+            <ImageButton
+                android:id="@+id/flashToggleButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@drawable/ic_flash"
+                app:tint="#FFFFFF"
+                android:background="@android:color/transparent"
+                android:contentDescription="ライト" />
+
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <ImageButton
+                android:id="@+id/guideToggleButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@drawable/ic_web_asset"
+                app:tint="#FFFFFF"
+                android:background="@android:color/transparent"
+                android:contentDescription="ガイド" />
+
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <ImageButton
+                android:id="@+id/tournamentSettingButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@drawable/ic_settings"
+                app:tint="#FFFFFF"
+                android:background="@android:color/transparent"
+                android:contentDescription="設定" />
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <ImageButton
+                android:id="@+id/entryListImportButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@drawable/ic_baseline_download_24"
+                app:tint="#FFFFFF"
+                android:background="@android:color/transparent"
+                android:contentDescription="EntryList読み込み" />
+
+
+
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+
+
+            <ImageButton
+                android:id="@+id/openCsvImageButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="CSVファイルを開く"
+                android:src="@drawable/ic_file"
+                app:tint="@android:color/white" />
+
+
+
+
+
+        </LinearLayout>
+
+        <!-- スコア画像プレビュー -->
+        <ImageView
+            android:id="@+id/scorePreview"
+            android:layout_width="match_parent"
+            android:layout_height="200dp"
+            android:layout_gravity="bottom|center"
+            android:scaleType="fitCenter"
+            android:visibility="gone"
+            android:translationY="-80dp" />
+
+        <!-- スコアラベル（12個） -->
+        <LinearLayout
+            android:id="@+id/scoreLabels"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_gravity="bottom"
+            android:translationY="-45dp"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:visibility="visible"
+            android:background="#AAFFFFFF"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp">
+            <TextView android:id="@+id/scoreLabel1" style="@style/ScoreLabelStyle"/>
+            <TextView android:id="@+id/scoreLabel2" style="@style/ScoreLabelStyle"/>
+            <TextView android:id="@+id/scoreLabel3" style="@style/ScoreLabelStyle"/>
+            <TextView android:id="@+id/scoreLabel4" style="@style/ScoreLabelStyle"/>
+            <TextView android:id="@+id/scoreLabel5" style="@style/ScoreLabelStyle"/>
+            <TextView android:id="@+id/scoreLabel6" style="@style/ScoreLabelStyle"/>
+            <TextView android:id="@+id/scoreLabel7" style="@style/ScoreLabelStyle"/>
+            <TextView android:id="@+id/scoreLabel8" style="@style/ScoreLabelStyle"/>
+            <TextView android:id="@+id/scoreLabel9" style="@style/ScoreLabelStyle"/>
+            <TextView android:id="@+id/scoreLabel10" style="@style/ScoreLabelStyle"/>
+            <TextView android:id="@+id/scoreLabel11" style="@style/ScoreLabelStyle"/>
+            <TextView android:id="@+id/scoreLabel12" style="@style/ScoreLabelStyle"/>
+        </LinearLayout>
+    </FrameLayout>
+
+
+    <!-- 赤枠と黒枠 -->
+    <com.example.resultreader.GuideOverlayView
+        android:id="@+id/guideOverlay"
+        android:layout_width="325dp"
+        android:layout_height="172.6dp"
+        android:layout_marginTop="100dp"
+        android:layout_marginStart="50dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <com.example.resultreader.OcrGuideOverlay
+        android:id="@+id/ocrGuideOverlay"
+        android:layout_width="60dp"
+        android:layout_height="40dp"
+        android:layout_marginStart="50dp"
+        android:layout_marginTop="100dp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <!-- スコア結果 & 操作UI -->
+    <LinearLayout
+        android:id="@+id/controlPanel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="16dp"
+        android:background="#F8F8F8"
+        app:layout_constraintTop_toBottomOf="@id/previewContainer"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <LinearLayout
+            android:id="@+id/scoreSummaryPanel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginBottom="8dp">
+
+            <!-- 減点表示：左・赤 -->
+            <TextView
+                android:id="@+id/scorePointText"
+                android:layout_width="100dp"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="G:　　-"
+                android:textSize="16sp"
+                android:background="@drawable/bg_score_deduction"
+                android:padding="6dp" />
+
+            <!-- クリーン表示：右・青 -->
+            <TextView
+                android:id="@+id/scoreCleanText"
+                android:layout_width="100dp"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="C:　　-"
+                android:textSize="16sp"
+                android:background="@drawable/bg_score_clean"
+                android:padding="6dp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/resultText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="No"
+            android:textSize="14sp"
+            android:textColor="@android:color/black"
+            android:layout_margin="14dp"
+            android:padding="8dp"
+            android:background="@drawable/score_label_bg" />
+
+        <Button
+            android:id="@+id/prepareButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="撮影準備（OCR）"
+            android:layout_marginTop="8dp" />
+
+        <Button
+            android:id="@+id/captureButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="撮影（保存）"
+            android:layout_marginTop="8dp"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/confirmButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="確認して保存"
+            android:layout_marginTop="8dp"
+            android:visibility="gone" />
+    </LinearLayout>
+
+
+
+
+
+
+
+</androidx.constraintlayout.widget.ConstraintLayout>

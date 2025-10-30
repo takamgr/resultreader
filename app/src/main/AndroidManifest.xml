@@ -1,0 +1,51 @@
+﻿<!-- 🔒 RRv1.6 Copilot Guard (ID: RRv1_6_GUARD)
+     Do NOT change absolute ROI/GuideOverlay geometry, view IDs referenced by code,
+     or CSV-related assumptions. If unsure: STOP and ask. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.resultreader">
+
+    <!-- カメラ＆保存に必要なパーミッション -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.ResultReader">
+
+        <activity
+            android:name=".CameraActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- FileProvider（アプリ内ResultReaderフォルダ用） -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.example.resultreader.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+    </application>
+
+
+
+
+
+</manifest>
