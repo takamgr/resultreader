@@ -1,0 +1,91 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <!-- 🔼 大会種別を先に表示 -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="大会種別"
+        android:textStyle="bold"
+        android:layout_marginBottom="8dp" />
+
+    <RadioGroup
+        android:id="@+id/radioGroupTournamentType"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <RadioButton
+            android:id="@+id/radioBeginner"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ビギナー大会" />
+
+        <RadioButton
+            android:id="@+id/radioChampionship"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="選手権大会" />
+    </RadioGroup>
+
+    <!-- ▼ 従来のパターン選択 -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="大会パターン"
+        android:textStyle="bold"
+        android:layout_marginTop="24dp"
+        android:layout_marginBottom="8dp" />
+
+    <RadioGroup
+        android:id="@+id/radioGroupPattern"
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <RadioButton
+            android:id="@+id/radioPattern4x2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="8セク×2ラップ（4×2）" />
+
+        <RadioButton
+            android:id="@+id/radioPattern5x2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="10セク×2ラップ（5×2）" />
+
+        <RadioButton
+            android:id="@+id/radioPattern4x3"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="8セク×3ラップ（4×3）" />
+    </RadioGroup>
+
+    <!-- ▼ セッション切替 -->
+    <LinearLayout
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp">
+
+        <Button
+            android:id="@+id/buttonAM"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="午前" />
+
+        <Button
+            android:id="@+id/buttonPM"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="午後"
+            android:layout_marginStart="8dp" />
+    </LinearLayout>
+</LinearLayout>
