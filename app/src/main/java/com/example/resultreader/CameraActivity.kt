@@ -107,7 +107,9 @@ class CameraActivity : AppCompatActivity() {
 
     // 手入力でEntryNoが確定済みかどうかの簡易フラグ
     private var manualEntryCommitted: Boolean = false
-
+    // C案: OCRで直近にEntryNoが読めたか／画面にスコア解析結果があるか
+    private var lastOcrHadEntry: Boolean = false  // 直近のOCRでEntryNoが読めたか
+    private var hasScoreResult: Boolean = false   // 画面にスコア解析結果が出ているか
 
 
     private val entryListPickerLauncher =
@@ -856,6 +858,8 @@ class CameraActivity : AppCompatActivity() {
     }
 
     private fun startOcrCapture() {
+        // 新規OCR開始時はスコア未解析扱いにリセット
+        hasScoreResult = false
         resultText.text = "認識中…"
         guideOverlay.setDetected("red")
         confirmButton.visibility = View.GONE
@@ -1030,6 +1034,8 @@ class CameraActivity : AppCompatActivity() {
                 val isWarningId = cleanText in listOf("6", "9", "06", "09", "60", "90", "69", "96")
 
                 if (entryNumber != null && entryNumber in 1..99) {
+                    // OCRで番号が読めた
+                    lastOcrHadEntry = true
                     resultText.text = "No: $entryNumber"
                     pendingSaveBitmap = fullImage
 
@@ -1043,7 +1049,7 @@ class CameraActivity : AppCompatActivity() {
                     if (entry != null) {
                         val (name, clazz) = entry
                         Toast.makeText(this, "✅ $name さん [$clazz]", Toast.LENGTH_SHORT).show()
-                      } else {
+                    } else {
                         Toast.makeText(this, "⚠️ EntryNo=$entryNumber は未登録です", Toast.LENGTH_LONG).show()
                     }
 
@@ -1079,12 +1085,15 @@ class CameraActivity : AppCompatActivity() {
                     scorePreview.visibility = View.VISIBLE
                     callback(result)
                 } else {
+                    // OCRで番号が読めなかった
+                    lastOcrHadEntry = false
                     guideOverlay.setDetected("red")
                     Toast.makeText(this, "認識エラー: $rawText", Toast.LENGTH_SHORT).show()
                     callback(null)
                 }
             }
             .addOnFailureListener {
+                lastOcrHadEntry = false
                 guideOverlay.setDetected("red")
                 Toast.makeText(this, "OCR失敗", Toast.LENGTH_SHORT).show()
                 callback(null)
@@ -1094,6 +1103,8 @@ class CameraActivity : AppCompatActivity() {
 
 
     private fun updateScoreUi(result: ScoreAnalyzer.ScoreResult) {
+        // スコアが適用された → 画面に解析結果あり
+        hasScoreResult = true
         val activeCount = when (selectedPattern) {
             TournamentPattern.PATTERN_4x2 -> 8
             TournamentPattern.PATTERN_4x3 -> 12
@@ -1415,9 +1426,25 @@ class CameraActivity : AppCompatActivity() {
                     Toast.makeText(this, "⚠️ EntryNo=$no は未登録です（保存時は拒否されます）", Toast.LENGTH_LONG).show()
                 }
 
-                // 手入力確定フラグ→スコア読取を開始
-                manualEntryCommitted = true
-                captureScoreOnlyMultiple()
+                // C案: OCRで直近に番号が読めていたかどうかで分岐
+                if (!lastOcrHadEntry) {
+                    // OCRで番号未認識 → 確認ダイアログを出してからスコア解析を実行
+                    AlertDialog.Builder(this)
+                        .setTitle("スコア解析しますか？")
+                        .setMessage("入力したエントリー番号でスコア解析を実行します。")
+                        .setPositiveButton("実行") { _, _ ->
+                            captureScoreOnlyMultiple()
+                        }
+                        .setNegativeButton("キャンセル", null)
+                        .show()
+                } else {
+                    // OCRで番号が読めていたケース
+                    // 基本は既にスコア解析済みだが、万一未解析なら解析を開始
+                    if (!hasScoreResult) {
+                        captureScoreOnlyMultiple()
+                    }
+                    // 解析済みなら何もしない（再解析不要）
+                }
             }
             .setNegativeButton("キャンセル", null)
             .show()
@@ -1425,6 +1452,8 @@ class CameraActivity : AppCompatActivity() {
 
     // 手入力確定時にスコアのみを撮影・解析してUI更新する（既存のOCR->スコア読み取りの挙動に合わせる）
     private fun captureScoreOnlyMultiple() {
+        // スコア単体読取を開始するため、解析未済にリセット
+        hasScoreResult = false
         val currentImageCapture = imageCapture
         if (currentImageCapture == null) {
             // カメラ未起動なら起動→少し待ってから開始
