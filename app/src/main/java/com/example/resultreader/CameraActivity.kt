@@ -44,6 +44,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import com.example.resultreader.BuildConfig
+import android.content.ContentValues
+import android.os.Build
+import android.provider.MediaStore
+import android.text.InputFilter
+import android.text.InputType
+import android.widget.EditText
 
 
 
@@ -416,6 +422,9 @@ class CameraActivity : AppCompatActivity() {
 
         resultText = findViewById(R.id.resultText)
         tournamentInfoText = findViewById(R.id.tournamentInfoText)
+        // 追加: EntryNo を手入力で修正できるようにする
+        resultText.setOnClickListener { showEntryNoEditDialog() }
+        resultText.setOnLongClickListener { showEntryNoEditDialog(); true }
         prepareButton = findViewById(R.id.prepareButton)
         confirmButton = findViewById(R.id.confirmButton)
         flashToggleButton = findViewById(R.id.flashToggleButton)
@@ -493,21 +502,49 @@ class CameraActivity : AppCompatActivity() {
 
             dialog.setOnShowListener {
                 dialog.listView.setOnItemLongClickListener { _, _, position, _ ->
-                    val fileToDelete = csvFiles[position]
+                    val fileTarget = csvFiles[position]
+                    val items = arrayOf("開く", "ダウンロードへコピー", "共有", "削除", "キャンセル")
+
                     AlertDialog.Builder(this)
-                        .setTitle("削除確認")
-                        .setMessage("「${fileToDelete.name}」を削除しますか？")
-                        .setPositiveButton("削除") { _, _ ->
-                            if (fileToDelete.delete()) {
-                                Toast.makeText(this, "削除しました", Toast.LENGTH_SHORT).show()
-                                openCsvImageButton.performClick() // 再表示！
-                            } else {
-                                Toast.makeText(this, "削除に失敗しました", Toast.LENGTH_SHORT).show()
+                        .setTitle(fileTarget.name)
+                        .setItems(items) { d, which ->
+                            when (which) {
+                                0 -> { // 開く
+                                    openCsvFile(fileTarget)
+                                }
+                                1 -> { // ダウンロードへコピー
+                                    val uri = copyToDownloads(fileTarget)
+                                    if (uri != null) {
+                                        Toast.makeText(this, "📂 ダウンロードにコピーしました\n${fileTarget.name}", Toast.LENGTH_LONG).show()
+                                    } else {
+                                        Toast.makeText(this, "コピーに失敗しました", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                                2 -> { // 共有
+                                    shareCsvFile(fileTarget)
+                                }
+                                3 -> { // 削除（既存仕様を維持）
+                                    AlertDialog.Builder(this)
+                                        .setTitle("削除確認")
+                                        .setMessage("「${fileTarget.name}」を削除しますか？")
+                                        .setPositiveButton("削除") { _, _ ->
+                                            if (fileTarget.delete()) {
+                                                Toast.makeText(this, "削除しました", Toast.LENGTH_SHORT).show()
+                                                // 一覧更新
+                                                findViewById<ImageButton>(R.id.openCsvImageButton).performClick()
+                                            } else {
+                                                Toast.makeText(this, "削除に失敗しました", Toast.LENGTH_SHORT).show()
+                                            }
+                                            dialog.dismiss()
+                                        }
+                                        .setNegativeButton("キャンセル", null)
+                                        .show()
+                                }
+                                else -> d.dismiss()
                             }
-                            dialog.dismiss()
                         }
-                        .setNegativeButton("キャンセル", null)
                         .show()
+
                     true
                 }
             }
@@ -1294,8 +1331,92 @@ class CameraActivity : AppCompatActivity() {
 
     }
 
+    // ヘルパー: Downloads にコピー（API29+ は MediaStore、旧API は直接コピー）
+    private fun copyToDownloads(src: File): Uri? {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val resolver = contentResolver
+                val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, src.name)
+                    put(MediaStore.Downloads.MIME_TYPE, "text/csv")
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val uri = resolver.insert(collection, values) ?: return null
+                resolver.openOutputStream(uri)?.use { out ->
+                    src.inputStream().use { it.copyTo(out) }
+                }
+                values.clear()
+                values.put(MediaStore.Downloads.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+                uri
+            } else {
+                val destDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                if (!destDir.exists()) destDir.mkdirs()
+                val dest = File(destDir, src.name)
+                src.copyTo(dest, overwrite = true)
+                Uri.fromFile(dest)
+            }
+        } catch (e: Exception) {
+            Log.e("EXPORT", "Downloadコピー失敗: ${src.name}", e)
+            null
+        }
+    }
+
+    // ヘルパー: CSV を共有
+    private fun shareCsvFile(file: File) {
+        val uri = FileProvider.getUriForFile(
+            this,
+            "com.example.resultreader.fileprovider",
+            file
+        )
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/csv"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, "CSVを共有"))
+    }
+
+    // エントリNo 手入力ダイアログ
+    private fun showEntryNoEditDialog() {
+        val currentNo = resultText.text.toString().replace(Regex("[^0-9]"), "")
+        val et = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            filters = arrayOf(InputFilter.LengthFilter(2)) // 1〜99想定
+            setText(currentNo)
+            hint = "1〜99"
+            setSelection(text?.length ?: 0)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("エントリー番号を入力")
+            .setView(et)
+            .setPositiveButton("OK") { _, _ ->
+                val no = et.text.toString().toIntOrNull()
+                if (no == null || no !in 1..99) {
+                    Toast.makeText(this, "1〜99の数字を入力してください", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+
+                // 表示＆手入力フラグ（黄色）
+                resultText.text = "No: $no"
+                resultText.setBackgroundColor(Color.parseColor("#FFE599"))
+
+                // 登録確認メッセージ
+                val entry = entryMap[no]
+                if (entry != null) {
+                    val (name, clazz) = entry
+                    Toast.makeText(this, "✅ $name さん [$clazz] を選択", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "⚠️ EntryNo=$no は未登録です（保存時は拒否されます）", Toast.LENGTH_LONG).show()
+                }
+            }
+            .setNegativeButton("キャンセル", null)
+            .show()
+    }
+
 
 
 
 }
-
