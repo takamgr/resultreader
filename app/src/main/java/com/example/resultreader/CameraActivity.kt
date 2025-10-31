@@ -252,7 +252,7 @@ class CameraActivity : AppCompatActivity() {
             return
         }
 
-        val fileName = "entrylist.csv"
+        val fileName = "EntryList.csv"
         val destFile = File(getExternalFilesDir("ResultReader"), fileName)
 
         val inputStream = contentResolver.openInputStream(uri)
@@ -1298,8 +1298,4 @@ class CameraActivity : AppCompatActivity() {
 
 
 }
-
-
-
-
 
