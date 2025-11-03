@@ -50,6 +50,7 @@ import android.provider.MediaStore
 import android.text.InputFilter
 import android.text.InputType
 import android.widget.EditText
+import android.widget.PopupMenu
 
 
 
@@ -437,6 +438,45 @@ class CameraActivity : AppCompatActivity() {
         scorePreview = findViewById(R.id.scorePreview)
         previewView = findViewById(R.id.previewView)
 
+        // 追加: 掲示用出力ボタンのクリックリスナー（R生成前の環境でも安全に動作するよう動的取得）
+        val exportHtmlButtonId = resources.getIdentifier("exportHtmlButton", "id", packageName)
+        if (exportHtmlButtonId != 0) {
+            val exportHtmlButton: Button? = findViewById(exportHtmlButtonId)
+            exportHtmlButton?.setOnClickListener {
+                PrintableExporter.exportPrintableHtmlToDownloads(this, selectedPattern)
+            }
+        }
+
+        val exportS1ButtonId = resources.getIdentifier("exportS1Button", "id", packageName)
+        if (exportS1ButtonId != 0) {
+            val exportS1Button: Button? = findViewById(exportS1ButtonId)
+            exportS1Button?.setOnClickListener {
+                PrintableExporter.exportS1CsvToDownloads(this, selectedPattern)
+            }
+        }
+
+        // 追加: 安全に btnExportS1Csv / btnExportHtml / btnExportPdf にハンドラを登録（IDがあれば動作）
+        val idBtnExportS1 = resources.getIdentifier("btnExportS1Csv", "id", packageName)
+        if (idBtnExportS1 != 0) {
+            findViewById<ImageButton?>(idBtnExportS1)?.setOnClickListener {
+                PrintableExporter.exportS1CsvToDownloads(this, selectedPattern)
+            }
+        }
+
+        val idBtnExportHtml = resources.getIdentifier("btnExportHtml", "id", packageName)
+        if (idBtnExportHtml != 0) {
+            findViewById<ImageButton?>(idBtnExportHtml)?.setOnClickListener {
+                PrintableExporter.exportPrintableHtmlToDownloads(this, selectedPattern)
+            }
+        }
+
+        val idBtnExportPdf = resources.getIdentifier("btnExportPdf", "id", packageName)
+        if (idBtnExportPdf != 0) {
+            findViewById<ImageButton?>(idBtnExportPdf)?.setOnClickListener {
+                PrintableExporter.exportPrintablePdfToDownloads(this, selectedPattern)
+            }
+        }
+
         // その後に SharedPreferences → 設定ダイアログ呼び出し！
         val prefs = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
         val today = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
@@ -778,8 +818,60 @@ class CameraActivity : AppCompatActivity() {
 
         entryMap = loadEntryMap()
 
+        // --- 追記: 下部の出力ボタンをランタイムで非表示にする（XMLは変更しない） ---
+        listOf("exportHtmlButton", "exportS1Button", "printButton").forEach { idName ->
+            val id = resources.getIdentifier(idName, "id", packageName)
+            if (id != 0) {
+                findViewById<View?>(id)?.visibility = View.GONE
+            }
+        }
 
+        // --- 追記: 右上のCSVボタン候補を探索し、長押しで出力メニューを表示 ---
+        fun setupExportLongPress(anchor: View) {
+            val popup = PopupMenu(this, anchor)
+            popup.menu.add(0, 1, 0, "掲示用HTMLを保存（S1）")
+            popup.menu.add(0, 2, 1, "掲示用PDFを保存（A4横・S1）")
+            popup.menu.add(0, 3, 2, "S1版CSVを保存")
+            // optional: popup.menu.add(0, 4, 3, "PDFを開く/印刷")
+
+            popup.setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    1 -> {
+                        PrintableExporter.exportPrintableHtmlToDownloads(this, selectedPattern)
+                        true
+                    }
+                    2 -> {
+                        PrintableExporter.exportPrintablePdfToDownloads(this, selectedPattern)
+                        true
+                    }
+                    3 -> {
+                        PrintableExporter.exportS1CsvToDownloads(this, selectedPattern)
+                        true
+                    }
+                    4 -> {
+                        // 4番もPDF保存のままでOK（別動作にしたいならここで差し替え）
+                        PrintableExporter.exportPrintablePdfToDownloads(this, selectedPattern)
+                        true
+                    }
+                    else -> false
+                }
+            }
+
+            popup.show()
+        }
+
+            val candidateIds = listOf("openCsvImageButton", "openCsvButton", "csvOpenButton", "resultCsvButton")
+        val anchorView = candidateIds
+            .map { resources.getIdentifier(it, "id", packageName) }
+            .mapNotNull { findViewById<View?>(it) }
+            .firstOrNull()
+
+        anchorView?.setOnLongClickListener {
+            setupExportLongPress(it)
+            true
+        }
     }
+
     private fun proceedWithSave(entryNumber: Int) {
         pendingSaveBitmap?.let {
             saveImage(it)

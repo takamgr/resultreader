@@ -270,6 +270,32 @@
             android:text="確認して保存"
             android:layout_marginTop="8dp"
             android:visibility="gone" />
+
+        <!-- 追記: 掲示用出力ボタン群（confirmButton の直下、左右並び） -->
+        <LinearLayout
+            android:id="@+id/exportButtonsContainer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginTop="8dp">
+
+            <Button
+                android:id="@+id/exportHtmlButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="掲示用HTML出力"
+                android:layout_marginEnd="8dp" />
+
+            <Button
+                android:id="@+id/exportS1Button"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="S1版CSV出力" />
+
+        </LinearLayout>
     </LinearLayout>
 
 
