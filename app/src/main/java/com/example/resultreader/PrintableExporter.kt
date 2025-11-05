@@ -1,3 +1,5 @@
+@file:Suppress("unused", "RedundantInitialiser", "UNUSED_PARAMETER", "RemoveRedundantElse")
+
 package com.example.resultreader
 
 import android.content.ContentValues
@@ -613,6 +615,32 @@ object PrintableExporter {
     // alignment enum used by cell renderer
     private enum class CellAlign { LEFT, CENTER, RIGHT }
 
+    // ヘッダに表示する大会名（Prefs の tournamentName、未設定時に "大会結果"）
+    private fun tournamentName(ctx: Context): String {
+        val p = ctx.getSharedPreferences("ResultReaderPrefs", Context.MODE_PRIVATE)
+        return p.getString("tournamentName", "大会結果") ?: "大会結果"
+    }
+
+    // 表示用開催日（Prefs の eventDate。未設定なら本日。フォーマット調整あり）
+    private fun eventDateDisplay(ctx: Context): String {
+        val p = ctx.getSharedPreferences("ResultReaderPrefs", Context.MODE_PRIVATE)
+        val s = p.getString("eventDate", null)
+        return when {
+            s.isNullOrBlank() -> SimpleDateFormat("yyyy/MM/dd", Locale.getDefault()).format(Date())
+            s.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) -> s.replace("-", "/")
+            s.matches(Regex("\\d{8}")) -> "${s.substring(0,4)}/${s.substring(4,6)}/${s.substring(6,8)}"
+            else -> s
+        }
+    }
+
+    // パターンを可読文に変換
+    private fun formatText(pattern: TournamentPattern): String = when (pattern) {
+        TournamentPattern.PATTERN_4x2 -> "8セクション2ラップ"
+        TournamentPattern.PATTERN_5x2 -> "10セクション2ラップ"
+        TournamentPattern.PATTERN_4x3 -> "8セクション3ラップ"
+        else -> pattern.patternCode
+    }
+
     // セル内テキスト描画（LEFT/CENTER/RIGHT） - object-scope helper
     private fun drawCellText(
         c: Canvas,
@@ -740,12 +768,15 @@ object PrintableExporter {
             val c = page.canvas
             var y = style.margin
 
-            // タイトル（1ページ目だけ）
+            // タイトル（1ページ目だけ） --- 大会名/開催日/形式をPrefsから表示
             if (firstPage) {
                 pBold.textSize = style.titleSize
-                c.drawText(getEventTitle(context), style.margin, y + style.titleSize, pBold)
+                val title = tournamentName(context)
+                val dateStr = eventDateDisplay(context)
+                val fmt = formatText(pattern)
+                c.drawText(title, style.margin, y + style.titleSize, pBold)
                 pText.textSize = style.subSize
-                c.drawText("日付: ${todayDisplay()}   形式: ${pattern.patternCode}",
+                c.drawText("日付: $dateStr   形式: $fmt",
                     style.margin, y + style.titleSize + style.subSize + 6f, pText)
                 pText.textSize = style.textSize
                 pBold.textSize = style.sectionSize
@@ -774,7 +805,7 @@ object PrintableExporter {
             // 行高
             val rowH = (style.textSize + style.padY * 2 + 6f)
 
-            // ヘッダ行
+            // ヘッダ行（背景＋見出し）
             pFill.color = style.headerBg
             c.drawRect(style.margin, y, style.margin + availW, y + rowH, pFill)
             var x = style.margin
@@ -783,8 +814,13 @@ object PrintableExporter {
                 drawCellText(c, h, x, colW[i], baseline, CellAlign.CENTER, pBold, style.padX)
                 x += colW[i]
             }
-            // 下線
+            // ヘッダ直下のみ太線（それ以外の行罫線は細線）
+            val strokeThin = 1f
+            val strokeBold = 2.4f
+            pGrid.strokeWidth = strokeBold
             c.drawLine(style.margin, y + rowH, style.margin + availW, y + rowH, pGrid)
+            // reset to thin for following lines
+            pGrid.strokeWidth = strokeThin
             y += rowH
 
             // データ行
@@ -794,7 +830,8 @@ object PrintableExporter {
                     pFill.color = style.zebraBg
                     c.drawRect(style.margin, y, style.margin + availW, y + rowH, pFill)
                 }
-                // 横罫
+                // 横罫（細線）
+                pGrid.strokeWidth = 1f
                 c.drawLine(style.margin, y + rowH, style.margin + availW, y + rowH, pGrid)
 
                 // セル描画

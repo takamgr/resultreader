@@ -1355,6 +1355,57 @@ class CameraActivity : AppCompatActivity() {
             updateSessionButtons(amButton, pmButton)
         }
 
+        // --- 追加: 大会名と開催日をダイアログに動的追加（Plan B: XML変更なし）
+        val prefsForDialog = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
+        val initialName = prefsForDialog.getString("tournamentName", "") ?: ""
+        val initialDate = prefsForDialog.getString("eventDate", "") ?: ""
+
+        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        lp.topMargin = (8 * resources.displayMetrics.density).toInt()
+
+        // 大会名入力
+        val editTournamentName = EditText(this).apply {
+            hint = "大会名（例：第3回 オラガバレーTRIALS）"
+            setText(initialName)
+            inputType = InputType.TYPE_CLASS_TEXT
+            layoutParams = lp
+            id = View.generateViewId()
+        }
+
+        // 開催日入力（非直接編集：DatePicker を開く）
+        val editEventDate = EditText(this).apply {
+            hint = "開催日 (YYYY-MM-DD)"
+            setText(initialDate)
+            isFocusable = false
+            isClickable = true
+            layoutParams = lp
+            id = View.generateViewId()
+            setOnClickListener {
+                // 現在の値をベースにカレンダー表示
+                val now = Calendar.getInstance()
+                val parts = text.toString().trim().takeIf { it.isNotEmpty() }?.let { s ->
+                    try {
+                        if (s.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {
+                            val p = s.split("-")
+                            Triple(p[0].toInt(), p[1].toInt()-1, p[2].toInt())
+                        } else if (s.matches(Regex("\\d{8}"))) {
+                            Triple(s.substring(0,4).toInt(), s.substring(4,6).toInt()-1, s.substring(6,8).toInt())
+                        } else null
+                    } catch (_: Exception) { null }
+                }
+                val y = parts?.first ?: now.get(Calendar.YEAR)
+                val m = parts?.second ?: now.get(Calendar.MONTH)
+                val d = parts?.third ?: now.get(Calendar.DAY_OF_MONTH)
+                android.app.DatePickerDialog(this@CameraActivity, { _, yy, mm, dd ->
+                    val ys = String.format(Locale.getDefault(), "%04d-%02d-%02d", yy, mm+1, dd)
+                    this@apply.setText(ys)
+                 }, y, m, d).show()
+            }
+        }
+
+        // ルートに追加（既存レイアウトの末尾に縦追加）
+        (dialogView as? LinearLayout)?.addView(editTournamentName)
+        (dialogView as? LinearLayout)?.addView(editEventDate)
         AlertDialog.Builder(this)
             .setTitle("本日の大会設定を確認してください")
             .setView(dialogView)
@@ -1375,7 +1426,14 @@ class CameraActivity : AppCompatActivity() {
                     putString("lastSetDate", today)
                     putString("lastPattern", selectedPattern.name)
                     putString("lastSession", currentSession)
-                    putString("tournamentType", tournamentType) // ← 🔥 追加ここ！
+                    putString("tournamentType", tournamentType)
+                    // 保存: 大会名 / 開催日（ダイアログの動的フィールドがあれば反映）
+                    try {
+                        val nameText = dialogView.findViewById<EditText>(editTournamentName.id)?.text?.toString()?.trim()
+                        val dateText = dialogView.findViewById<EditText>(editEventDate.id)?.text?.toString()?.trim()
+                        if (!nameText.isNullOrBlank()) putString("tournamentName", nameText)
+                        if (!dateText.isNullOrBlank()) putString("eventDate", dateText)
+                    } catch (_: Exception) { /* ignore */ }
                     apply()
                 }
 
