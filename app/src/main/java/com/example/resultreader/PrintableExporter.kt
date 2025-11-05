@@ -8,13 +8,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.annotation.SuppressLint
-import android.widget.Toast
-import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.pdf.PdfDocument
+import android.widget.Toast
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.text.SimpleDateFormat
@@ -32,7 +28,10 @@ object PrintableExporter {
     private fun todayDisplay() = SimpleDateFormat("yyyy/MM/dd", Locale.getDefault()).format(Date())
 
     private fun resultCsvFile(context: Context, pattern: TournamentPattern): File =
-        File(context.getExternalFilesDir("ResultReader"), "result_${pattern.patternCode}_${todayName()}.csv")
+        File(
+            context.getExternalFilesDir("ResultReader"),
+            "result_${pattern.patternCode}_${todayName()}.csv"
+        )
 
     // 大会名の保存／取得（UIから任意で設定できる）
     @Suppress("unused")
@@ -41,6 +40,7 @@ object PrintableExporter {
             .edit().putString("eventTitle", title.trim()).apply()
         Toast.makeText(context, "大会名を保存しました：$title", Toast.LENGTH_SHORT).show()
     }
+
     private fun getEventTitle(context: Context): String {
         val p = context.getSharedPreferences("ResultReaderPrefs", Context.MODE_PRIVATE)
         return p.getString("eventTitle", "大会結果") ?: "大会結果"
@@ -51,11 +51,15 @@ object PrintableExporter {
     /** 共有/Excel用：ヘッダだけ Sec##→S# へ変換したCSVを Downloads/ResultReader に保存 */
     fun exportS1CsvToDownloads(context: Context, pattern: TournamentPattern): Uri? {
         val src = resultCsvFile(context, pattern)
-        if (!src.exists()) { Toast.makeText(context, "本日のCSVが見つかりません", Toast.LENGTH_SHORT).show(); return null }
+        if (!src.exists()) {
+            Toast.makeText(context, "本日のCSVが見つかりません", Toast.LENGTH_SHORT)
+                .show(); return null
+        }
         val lines = src.readLines(Charsets.UTF_8)
         if (lines.isEmpty()) return null
 
-        val s1Header = lines.first().replace(Regex("""Sec0?(\d{1,2})""")) { m -> "S${m.groupValues[1].toInt()}" }
+        val s1Header = lines.first()
+            .replace(Regex("""Sec0?(\d{1,2})""")) { m -> "S${m.groupValues[1].toInt()}" }
         val outText = buildString {
             append("\uFEFF") // Excel想定でBOM付与
             append(s1Header).append('\n')
@@ -68,199 +72,45 @@ object PrintableExporter {
     // ───────── HTML（掲示用） ─────────
 
     /** 掲示用：クラスごとに区切り、不要列除外、日本語＋S1見出し、ヘッダ（大会名＋日付）付きでHTML保存 */
-    fun exportPrintableHtmlToDownloads(context: Context, pattern: TournamentPattern): Uri? {
-        val html = buildPrintableHtml(context, pattern) ?: run {
-            Toast.makeText(context, "本日のCSVが見つかりません", Toast.LENGTH_SHORT).show()
-            return null
-        }
-        val name = "result_${pattern.patternCode}_${todayName()}_print.html"
-        return writeToDownloads(context, name, "text/html", html.toByteArray(Charsets.UTF_8))
+    @Deprecated("HTML export removed, use exportPrintablePdfStyledFromCsv", level = DeprecationLevel.HIDDEN)
+    private fun exportPrintableHtmlToDownloads(context: Context, pattern: TournamentPattern): Uri? {
+        // Deprecated: intentionally kept private to avoid accidental use
+        return null
     }
 
     /** 旧：全クラスまとめて1枚のPDF（必要なら残す） */
-    fun exportPrintablePdfToDownloads(context: Context, pattern: TournamentPattern) {
-        val html = buildPrintableHtml(context, pattern) ?: run {
-            Toast.makeText(context, "本日のCSVが見つかりません", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val bytes = htmlToPdfBytes(context, html)
-        writeToDownloads(context, "result_${pattern.patternCode}_${todayName()}_print.pdf", "application/pdf", bytes)
+    @Deprecated("Use exportPrintablePdfStyledFromCsv instead", level = DeprecationLevel.HIDDEN)
+    private fun exportPrintablePdfToDownloads(context: Context, pattern: TournamentPattern) {
+        // Delegate to Canvas renderer
+        exportPrintablePdfStyledFromCsv(context, pattern, rowsPerPage = 15)
     }
 
     // ───────── クラス別 PDF ─────────
 
     /** 改ページ型：クラスごとに rowsPerPage で分割し連番PDFを保存（2枚目以降は大会名・日付を省略） */
+    @Deprecated("Use exportPrintablePdfStyledFromCsv instead", level = DeprecationLevel.HIDDEN)
     @Suppress("unused")
-    fun exportPrintablePdfByClass(context: Context, pattern: TournamentPattern, rowsPerPage: Int = 15) {
-        val src = resultCsvFile(context, pattern)
-        if (!src.exists()) { Toast.makeText(context, "本日のCSVが見つかりません", Toast.LENGTH_SHORT).show(); return }
-        val lines = src.readLines(Charsets.UTF_8); if (lines.isEmpty()) return
-
-        val header = lines.first().split(",").map { it.trim().removePrefix("\uFEFF") }
-        val data = lines.drop(1).map { it.split(",") }
-
-        fun jpHeader(h: String): String = when (h) {
-            "EntryNo" -> "No"; "Name" -> "名前"; "Class" -> "クラス"
-            "AmG" -> "AG"; "AmC" -> "AC"; "AmRank" -> "A順"
-            "PmG" -> "PG"; "PmC" -> "PC"; "PmRank" -> "P順"
-            "TotalG" -> "TG"; "TotalC" -> "TC"; "TotalRank" -> "順位"
-            "時刻", "入力", "セッション" -> ""
-            else -> h.replace(Regex("""Sec0?(\d{1,2})""")) { m -> "S${m.groupValues[1].toInt()}" }
-        }
-        val keepIdx = header.mapIndexedNotNull { i, h -> jpHeader(h).ifBlank { null }?.let { i } }
-        val jpHeaders = keepIdx.map { jpHeader(header[it]) }
-        val secCount = jpHeaders.count { it.matches(Regex("^S\\d+$")) }
-        val is24 = secCount >= 24
-
-        val prefs = context.getSharedPreferences("ResultReaderPrefs", Context.MODE_PRIVATE)
-        val order = when (prefs.getString("tournamentType", "beginner")) {
-            "championship" -> listOf("IA", "IB", "NA", "NB")
-            else -> listOf("オープン", "ビギナー")
-        }
-        val classIdx = header.indexOf("Class")
-        val groupedAll = data.groupBy { row -> row.getOrNull(classIdx) ?: "" }
-
-        val title = getEventTitle(context)
-        val dateStr = todayDisplay()
-
-        val orderedKeys = buildList {
-            addAll(order)
-            addAll(groupedAll.keys.filter { it.isNotBlank() && it !in order }.sorted())
-        }
-
-        var anySaved = false
-        orderedKeys.forEach { clazz ->
-            val list = groupedAll[clazz].orEmpty()
-            if (list.isEmpty()) return@forEach
-            val pages = list.chunked(rowsPerPage)
-            pages.forEachIndexed { index, pageRows ->
-                val html = buildClassPageHtml(
-                    title = title, dateStr = dateStr, patternCode = pattern.patternCode,
-                    clazz = clazz, headers = jpHeaders, keepIdx = keepIdx, rows = pageRows,
-                    showGlobalHeader = (index == 0), is24 = is24
-                )
-                val name = "result_${pattern.patternCode}_${todayName()}_${clazz}${if (pages.size == 1) "" else "_${index + 1}"}.pdf"
-                val uri = writeToDownloads(context, name, "application/pdf", htmlToPdfBytes(context, html))
-                anySaved = anySaved or (uri != null)
-            }
-        }
-
-        Toast.makeText(context, if (anySaved) "✅ クラス別PDFを保存しました" else "❌ PDF出力なし", Toast.LENGTH_SHORT).show()
+    private fun exportPrintablePdfByClass(
+        context: Context,
+        pattern: TournamentPattern,
+        rowsPerPage: Int = 15
+    ) {
+        // Delegate to unified Canvas renderer
+        exportPrintablePdfStyledFromCsv(context, pattern, rowsPerPage)
+        return
     }
-    // クラス別（複数ページ時は2枚目以降ヘッダ無し）1ページ分のHTMLを作る
-    private fun buildClassPageHtml(
-        title: String,
-        dateStr: String,
-        patternCode: String,
-        clazz: String,
-        headers: List<String>,
-        keepIdx: List<Int>,
-        rows: List<List<String>>,
-        showGlobalHeader: Boolean,
-        is24: Boolean
-    ): String {
-        return buildString {
-            append("""
-            <html><head><meta charset="UTF-8">
-            <style>
-              @page { size: A4 landscape; margin: 0; }
-              html, body { margin:0; padding:0; }
-              body{ font-family:sans-serif; padding:10mm; }
-              .header{ margin-bottom:8px; }
-              .title{ font-size:18pt; font-weight:700; }
-              .sub{ font-size:11pt; color:#444; }
-              h2{ margin:12px 0 6px 0; border-left:6px solid #333; padding-left:8px; }
-              table{ width:100%; border-collapse:collapse; margin-top:6px; table-layout:fixed; }
-              th,td{
-                border:1px solid #999;
-                padding:${if (is24) "3px 4px" else "4px 6px"};
-                font-size:${if (is24) "9.5pt" else "10pt"};
-                line-height:1.25;
-                white-space:nowrap; text-align:center; overflow:hidden; text-overflow:clip;
-              }
-              thead th{ background:#f0f0f0; }
-            </style></head><body>
-        """.trimIndent())
-
-            if (showGlobalHeader) {
-                append("<div class='header'><div class='title'>")
-                    .append(title)
-                    .append("</div><div class='sub'>")
-                    .append(dateStr)
-                    .append("　/　形式: ").append(patternCode)
-                    .append("</div></div>")
-            }
-
-            append("<h2>").append(clazz).append("クラス</h2>")
-            append("<table><thead><tr>")
-            headers.forEach { append("<th>").append(it).append("</th>") }
-            append("</tr></thead><tbody>")
-            rows.forEach { row ->
-                append("<tr>")
-                keepIdx.forEach { i -> append("<td>").append(row.getOrNull(i) ?: "").append("</td>") }
-                append("</tr>")
-            }
-            append("</tbody></table></body></html>")
-        }
-    }
-
 
     /** 1クラス＝A4一枚に圧縮して保存（クラス数ぶんファイル） */
+    @Deprecated("Use exportPrintablePdfStyledFromCsv instead", level = DeprecationLevel.HIDDEN)
     @Suppress("unused")
-    fun exportPrintablePdfPerClassSinglePage(context: Context, pattern: TournamentPattern, rowsTarget: Int = 15) {
-        val src = resultCsvFile(context, pattern)
-        if (!src.exists()) { Toast.makeText(context, "本日のCSVが見つかりません", Toast.LENGTH_SHORT).show(); return }
-
-        val lines = src.readLines(Charsets.UTF_8); if (lines.isEmpty()) return
-        val header = lines.first().split(",").map { it.trim().removePrefix("\uFEFF") }
-        val data = lines.drop(1).map { it.split(",") }
-
-        fun jpHeader(h: String): String = when (h) {
-            "EntryNo" -> "No"; "Name" -> "名前"; "Class" -> "クラス"
-            "AmG" -> "AG"; "AmC" -> "AC"; "AmRank" -> "A順"
-            "PmG" -> "PG"; "PmC" -> "PC"; "PmRank" -> "P順"
-            "TotalG" -> "TG"; "TotalC" -> "TC"; "TotalRank" -> "順位"
-            "時刻", "入力", "セッション" -> ""
-            else -> h.replace(Regex("""Sec0?(\d{1,2})""")) { m -> "S${m.groupValues[1].toInt()}" }
-        }
-        val keepIdx = header.mapIndexedNotNull { i, h -> jpHeader(h).ifBlank { null }?.let { i } }
-        val jpHeaders = keepIdx.map { jpHeader(header[it]) }
-        val secCount = jpHeaders.count { it.matches(Regex("^S\\d+$")) }
-        val is24 = secCount >= 24
-
-        val prefs = context.getSharedPreferences("ResultReaderPrefs", Context.MODE_PRIVATE)
-        val order = when (prefs.getString("tournamentType", "beginner")) {
-            "championship" -> listOf("IA", "IB", "NA", "NB")
-            else -> listOf("オープン", "ビギナー")
-        }
-        val classIdx = header.indexOf("Class")
-        val grouped = data.groupBy { it.getOrNull(classIdx) ?: "" }
-
-        val title = getEventTitle(context)
-        val dateStr = todayDisplay()
-
-        var anySaved = false
-        val keys = buildList {
-            addAll(order)
-            addAll(grouped.keys.filter { it.isNotBlank() && it !in order }.sorted())
-        }
-        keys.forEach { clazz ->
-            val rows = grouped[clazz].orEmpty()
-            if (rows.isEmpty()) return@forEach
-            if (rows.size > rowsTarget) {
-                Toast.makeText(context, "⚠️ $clazz は ${rows.size}件。1枚に圧縮します（推奨15）。", Toast.LENGTH_SHORT).show()
-            }
-            val html = buildSingleClassHtml(
-                title = title, dateStr = dateStr, patternCode = pattern.patternCode,
-                clazz = clazz, headers = jpHeaders, keepIdx = keepIdx, rows = rows,
-                is24 = is24, rowsTarget = rowsTarget
-            )
-            val name = "result_${pattern.patternCode}_${todayName()}_${clazz}.pdf"
-            val uri = writeToDownloads(context, name, "application/pdf", htmlToPdfBytes(context, html))
-            anySaved = anySaved or (uri != null)
-        }
-
-        Toast.makeText(context, if (anySaved) "✅ クラス別PDF（1枚/クラス）を保存しました" else "❌ PDF出力なし", Toast.LENGTH_SHORT).show()
+    private fun exportPrintablePdfPerClassSinglePage(
+        context: Context,
+        pattern: TournamentPattern,
+        rowsTarget: Int = 15
+    ) {
+        // Delegate to unified Canvas renderer
+        exportPrintablePdfStyledFromCsv(context, pattern, rowsPerPage = rowsTarget)
+        return
     }
 
     // ───────── 内部HTML構築 ─────────
@@ -281,6 +131,7 @@ object PrintableExporter {
             "時刻", "入力", "セッション" -> "" // 掲示では非表示
             else -> h.replace(Regex("""Sec0?(\d{1,2})""")) { m -> "S${m.groupValues[1].toInt()}" }
         }
+
         val keepIdx = header.mapIndexedNotNull { i, h -> jpHeader(h).ifBlank { null }?.let { i } }
         val jpHeaders = keepIdx.map { jpHeader(header[it]) }
 
@@ -352,7 +203,9 @@ object PrintableExporter {
 
                 list.forEach { row ->
                     append("<tr>")
-                    keepIdx.forEach { i -> append("<td>").append(row.getOrNull(i) ?: "").append("</td>") }
+                    keepIdx.forEach { i ->
+                        append("<td>").append(row.getOrNull(i) ?: "").append("</td>")
+                    }
                     append("</tr>")
                 }
 
@@ -379,7 +232,8 @@ object PrintableExporter {
         val pad = if (is24) "3px 4px" else "4px 6px"
 
         return buildString {
-            append("""
+            append(
+                """
                 <html><head><meta charset="UTF-8">
                 <style>
                   @page { size: A4 landscape; margin: 0; }
@@ -411,7 +265,8 @@ object PrintableExporter {
                   })();
                 </script>
                 </head><body>
-            """.trimIndent())
+            """.trimIndent()
+            )
 
             append("<div class='header'><div class='title'>")
                 .append(title)
@@ -426,7 +281,9 @@ object PrintableExporter {
             append("</tr></thead><tbody>")
             rows.forEach { row ->
                 append("<tr>")
-                keepIdx.forEach { i -> append("<td>").append(row.getOrNull(i) ?: "").append("</td>") }
+                keepIdx.forEach { i ->
+                    append("<td>").append(row.getOrNull(i) ?: "").append("</td>")
+                }
                 append("</tr>")
             }
             append("</tbody></table></div></body></html>")
@@ -436,123 +293,40 @@ object PrintableExporter {
     // ───────── WebView → PDF（UIスレ安全版） ─────────
 
     /** HTML文字列をA4横1ページのPDFバイト列へ（UIスレブロックなし） */
-    @SuppressLint("SetJavaScriptEnabled")
+    @Deprecated("WebView-based PDF generation removed; use Canvas renderer", level = DeprecationLevel.HIDDEN)
+    @Suppress("unused")
     private fun htmlToPdfBytes(context: Context, html: String): ByteArray {
-        val latch = java.util.concurrent.CountDownLatch(1)
-        var bytes = ByteArray(0)
-
-        val main = android.os.Handler(android.os.Looper.getMainLooper())
-        main.post {
-            val act = context as? android.app.Activity
-            val root = act?.window?.decorView as? android.view.ViewGroup
-            if (act == null || root == null) { latch.countDown(); return@post }
-
-            val web = WebView(context).apply {
-                settings.javaScriptEnabled = true
-                settings.defaultTextEncodingName = "utf-8"
-                setBackgroundColor(android.graphics.Color.WHITE)
-                setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
-                alpha = 0.01f
-                layoutParams = android.widget.FrameLayout.LayoutParams(
-                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-            }
-            root.addView(web)
-            fun cleanup() { root.removeView(web); web.destroy() }
-
-            web.webViewClient = object : WebViewClient() {
-                override fun onPageFinished(view: WebView, url: String?) {
-                    val js = """
-                        (function(){
-                          var w = Math.max(document.documentElement.scrollWidth,  document.body.scrollWidth  || 0);
-                          var h = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight || 0);
-                          return w + 'x' + h;
-                        })();
-                    """.trimIndent()
-                    view.evaluateJavascript(js) { res ->
-                        try {
-                            val parts = res?.trim('"')?.split('x') ?: emptyList()
-                            val cssW = parts.getOrNull(0)?.toFloatOrNull() ?: 1400f
-                            val cssH = parts.getOrNull(1)?.toFloatOrNull() ?: (view.contentHeight.toFloat().coerceAtLeast(1f))
-
-                            val density = context.resources.displayMetrics.density
-                            val bw = (cssW * density).toInt().coerceAtLeast(1)
-                            val bh = (cssH * density).toInt().coerceAtLeast(1)
-
-                            web.measure(
-                                android.view.View.MeasureSpec.makeMeasureSpec(bw, android.view.View.MeasureSpec.EXACTLY),
-                                android.view.View.MeasureSpec.makeMeasureSpec(0, android.view.View.MeasureSpec.UNSPECIFIED)
-                            )
-                            web.layout(0, 0, bw, bh)
-
-                            web.postDelayed({
-                                val bmp = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
-                                val canvas = Canvas(bmp)
-                                canvas.drawColor(android.graphics.Color.WHITE)
-                                web.draw(canvas)
-
-                                val pageW = 842; val pageH = 595
-                                val margin = 12f
-                                val availW = pageW - margin * 2
-                                val availH = pageH - margin * 2
-                                val scale = 0.99f * minOf(availW / bw.toFloat(), availH / bh.toFloat())
-
-                                val pdf = PdfDocument()
-                                val page = pdf.startPage(PdfDocument.PageInfo.Builder(pageW, pageH, 1).create())
-                                page.canvas.translate(margin + maxOf((availW - bw*scale)/2f, 0f), margin)
-                                page.canvas.scale(scale, scale)
-                                page.canvas.drawBitmap(bmp, 0f, 0f, null)
-                                pdf.finishPage(page)
-
-                                val bos = ByteArrayOutputStream()
-                                pdf.writeTo(bos)
-                                pdf.close()
-                                bmp.recycle()
-
-                                bytes = bos.toByteArray()
-                                cleanup()
-                                latch.countDown()
-                            }, 80)
-                        } catch (_: Exception) {
-                            cleanup(); latch.countDown()
-                        }
-                    }
-                }
-            }
-            web.loadDataWithBaseURL("about:blank", html, "text/html", "UTF-8", null)
-        }
-
-        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-            // 呼び出しがUIスレ：短命ワーカーで待機
-            val done = java.util.concurrent.CountDownLatch(1)
-            var out = ByteArray(0)
-            Thread {
-                latch.await()
-                out = bytes
-                done.countDown()
-            }.start()
-            done.await()
-            return out
-        } else {
-            latch.await()
-            return bytes
-        }
+        // Removed: WebView path is deprecated. Return empty bytes.
+        return ByteArray(0)
     }
+
+    // ---------- Helper for Canvas renderer: snap to 0.5 to avoid hairline blurring
+    private fun snapHalf(v: Float): Float = kotlin.math.floor(v) + 0.5f
 
     // ───────── Downloads/ResultReader 出力 ─────────
 
-    private fun writeToDownloads(context: Context, name: String, mime: String, bytes: ByteArray): Uri? {
+    private fun writeToDownloads(
+        context: Context,
+        name: String,
+        mime: String,
+        bytes: ByteArray
+    ): Uri? {
         return try {
             val cr = context.contentResolver
             val uri: Uri? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, name)
                     put(MediaStore.MediaColumns.MIME_TYPE, mime)
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/ResultReader")
+                    put(
+                        MediaStore.MediaColumns.RELATIVE_PATH,
+                        "${Environment.DIRECTORY_DOWNLOADS}/ResultReader"
+                    )
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
-                cr.insert(MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values)
+                cr.insert(
+                    MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+                    values
+                )
             } else {
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, name)
@@ -579,7 +353,8 @@ object PrintableExporter {
                 cr.update(uri, v, null, null)
             }
 
-            Toast.makeText(context, "✅ Downloads/ResultReader に出力しました", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "✅ Downloads/ResultReader に出力しました", Toast.LENGTH_SHORT)
+                .show()
             uri
         } catch (e: Exception) {
             e.printStackTrace()
@@ -597,16 +372,16 @@ object PrintableExporter {
         val textSize: Float = 10f,               // 24セク時は呼び出し側で9.5fに
         val padX: Float = 4f,
         val padY: Float = 4f,
-        val headerBg: Int = android.graphics.Color.rgb(245,245,245),
-        val zebraBg: Int = android.graphics.Color.rgb(252,252,252),
-        val grid: Int = android.graphics.Color.rgb(180,180,180),
+        val headerBg: Int = android.graphics.Color.rgb(245, 245, 245),
+        val zebraBg: Int = android.graphics.Color.rgb(252, 252, 252),
+        val grid: Int = android.graphics.Color.rgb(180, 180, 180),
         val text: Int = android.graphics.Color.BLACK
     )
 
     // ── 右寄せ対象の判定（数値系は右寄せ）
     private fun isNumericCol(label: String): Boolean {
         return label.matches(Regex("^S\\d+$")) ||
-               label in listOf("AG","AC","A順","PG","PC","P順","TG","TC","順位","No")
+                label in listOf("AG", "AC", "A順", "PG", "PC", "P順", "TG", "TC", "順位", "No")
     }
 
     private fun condensed(): android.graphics.Typeface =
@@ -628,7 +403,13 @@ object PrintableExporter {
         return when {
             s.isNullOrBlank() -> SimpleDateFormat("yyyy/MM/dd", Locale.getDefault()).format(Date())
             s.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) -> s.replace("-", "/")
-            s.matches(Regex("\\d{8}")) -> "${s.substring(0,4)}/${s.substring(4,6)}/${s.substring(6,8)}"
+            s.matches(Regex("\\d{8}")) -> "${s.substring(0, 4)}/${
+                s.substring(
+                    4,
+                    6
+                )
+            }/${s.substring(6, 8)}"
+
             else -> s
         }
     }
@@ -670,61 +451,78 @@ object PrintableExporter {
         }
     }
 
+    // 表示用：クラス見出しを日本語フル表記にする（例: オープンクラス / ビギナークラス / IAクラス）
+    private fun displayClassTitle(src: String, tournamentType: String): String {
+        return when (tournamentType) {
+            "championship" -> "${src}クラス"
+            else -> when (src) {
+                "オープン", "Op" -> "オープンクラス"
+                "ビギナー", "B" -> "ビギナークラス"
+                else -> "${src}クラス"
+            }
+        }
+    }
+
+    // ── CSV→PDF（Canvas描画・クラス別・複数ページ対応）
     // ── CSV→PDF（Canvas描画・クラス別・複数ページ対応）
     fun exportPrintablePdfStyledFromCsv(
         context: Context,
         pattern: TournamentPattern,
         rowsPerPage: Int = 15
     ) {
-        val src = File(context.getExternalFilesDir("ResultReader"),
-            "result_${pattern.patternCode}_${todayName()}.csv")
-        if (!src.exists()) { Toast.makeText(context, "本日のCSVが見つかりません", Toast.LENGTH_SHORT).show(); return }
+        val src = File(
+            context.getExternalFilesDir("ResultReader"),
+            "result_${pattern.patternCode}_${todayName()}.csv"
+        )
+        if (!src.exists()) {
+            Toast.makeText(context, "本日のCSVが見つかりません", Toast.LENGTH_SHORT).show(); return
+        }
 
         val lines = src.readLines(Charsets.UTF_8)
         if (lines.isEmpty()) return
 
-        // 見出し整形（S1表記 & 日本語化 & 非表示列除去）
+        // 見出し整形（S1表記 & 日本語化 & 非表示列除外）
+        // NOTE: "Class" を空にすることでテーブルからクラス列を削除する（Canvas出力専用）
         fun jpHeader(hRaw: String): String {
-            // 余計な空白/BOM/二重引用符を除去
             val h = hRaw.trim().removePrefix("\uFEFF").trim('"')
-
             return when (h) {
                 "EntryNo" -> "No"
-                "Name"    -> "名前"
-                "Class"   -> "クラス"
-                "AmG"     -> "AG"
-                "AmC"     -> "AC"
-                "AmRank"  -> "A順"
-                "PmG"     -> "PG"
-                "PmC"     -> "PC"
-                "PmRank"  -> "P順"
-                "TotalG"  -> "TG"
-                "TotalC"  -> "TC"
+                "Name" -> "名前"
+                "Class" -> "" // ← クラス列を非表示にする
+                "AmG" -> "AG"
+                "AmC" -> "AC"
+                "AmRank" -> "A順"
+                "PmG" -> "PG"
+                "PmC" -> "PC"
+                "PmRank" -> "P順"
+                "TotalG" -> "TG"
+                "TotalC" -> "TC"
                 "TotalRank" -> "順位"
                 "時刻", "入力", "セッション" -> "" // 非表示
                 else -> {
-                    // Sec01, "Sec1", Sec09 → S1, S9, S10 に統一
                     val m = Regex("""^Sec0*(\d{1,2})$""").matchEntire(h)
                     if (m != null) "S${m.groupValues[1].toInt()}" else h
                 }
             }
         }
+
         val headerRaw = lines.first().split(",").map { it.trim().removePrefix("\uFEFF") }
-        val keepIdx = headerRaw.mapIndexedNotNull { i, h -> jpHeader(h).ifBlank{null}?.let{ i } }
+        val keepIdx =
+            headerRaw.mapIndexedNotNull { i, h -> jpHeader(h).ifBlank { null }?.let { i } }
         val headers = keepIdx.map { jpHeader(headerRaw[it]) }
         val rowsAll = lines.drop(1).map { it.split(",") }
 
         val secCount = headers.count { it.matches(Regex("^S\\d+$")) }
         val style = if (secCount >= 24)
             TableStyle(textSize = 9.5f, padX = 3f, padY = 3f)
-          else
+        else
             TableStyle()
 
         // クラス順（設定から）
         val prefs = context.getSharedPreferences("ResultReaderPrefs", Context.MODE_PRIVATE)
         val order = when (prefs.getString("tournamentType", "beginner")) {
-            "championship" -> listOf("IA","IB","NA","NB")
-            else -> listOf("オープン","ビギナー")
+            "championship" -> listOf("IA", "IB", "NA", "NB")
+            else -> listOf("オープン", "ビギナー")
         }
         val classIdx = headerRaw.indexOf("Class")
         val grouped = rowsAll.groupBy { it.getOrNull(classIdx) ?: "" }
@@ -733,38 +531,58 @@ object PrintableExporter {
             addAll(grouped.keys.filter { it.isNotBlank() && it !in order }.sorted())
         }
 
-        // tournamentType を事前に取得して drawPage 等で使う
         val tType = prefs.getString("tournamentType", "beginner") ?: "beginner"
 
         // A4 横（ポイント単位）
-        val pageW = 842; val pageH = 595
+        val pageW = 842
+        val pageH = 595
         val pdf = PdfDocument()
-        // ③ Paint設定 微調整（太い縦線対策）
+
+        // Paint
         val pText = android.graphics.Paint().apply {
             isAntiAlias = true
             color = style.text
             textSize = style.textSize
             typeface = condensed()
-            // 'style' local variable shadows Paint.style, so reference via this
-            this.style = android.graphics.Paint.Style.FILL   // 実線塗りのみ
+            this.style = android.graphics.Paint.Style.FILL
             this.strokeWidth = 0f
         }
         val pBold = android.graphics.Paint(pText).apply {
-            // FakeBold は縦方向に滲みが出やすいので使わない
             isFakeBoldText = false
             textSize = style.textSize
         }
         val pFill = android.graphics.Paint().apply { isAntiAlias = true }
+        @Suppress("UNUSED_VARIABLE")
         val pGrid = android.graphics.Paint().apply {
-            isAntiAlias = true
+            // vertical lines or strokes if needed
+            isAntiAlias = false
             color = style.grid
             strokeWidth = 1f
-            // 指定は this.style で明示
+            strokeCap = android.graphics.Paint.Cap.BUTT
+            strokeJoin = android.graphics.Paint.Join.MITER
             this.style = android.graphics.Paint.Style.STROKE
         }
 
+        // 罫線（塗り矩形で描画するための塗りPaint）
+        val pLineFill = android.graphics.Paint().apply {
+            isAntiAlias = false
+            this.style = android.graphics.Paint.Style.FILL
+            color = style.grid
+        }
+
+        // 横線は矩形で描く（整数Yにスナップしてサブピクセルの揺れを防止）
+        fun hLine(c: Canvas, x1: Float, x2: Float, y: Float, thickPt: Float) {
+            val yy = y.toInt().toFloat()
+            c.drawRect(x1, yy, x2, yy + thickPt, pLineFill)
+        }
+
+        // 1px線をクッキリ出すために 0.5 にスナップ
+        fun snapHalf(v: Float) = kotlin.math.floor(v) + 0.5f
+
         fun drawPage(clazz: String, rows: List<List<String>>, firstPage: Boolean) {
-            val page = pdf.startPage(PdfDocument.PageInfo.Builder(pageW, pageH, pdf.pages.size + 1).create())
+            val page = pdf.startPage(
+                PdfDocument.PageInfo.Builder(pageW, pageH, pdf.pages.size + 1).create()
+            )
             val c = page.canvas
             var y = style.margin
 
@@ -776,34 +594,36 @@ object PrintableExporter {
                 val fmt = formatText(pattern)
                 c.drawText(title, style.margin, y + style.titleSize, pBold)
                 pText.textSize = style.subSize
-                c.drawText("日付: $dateStr   形式: $fmt",
-                    style.margin, y + style.titleSize + style.subSize + 6f, pText)
+                c.drawText(
+                    "日付: $dateStr   形式: $fmt",
+                    style.margin, y + style.titleSize + style.subSize + 6f, pText
+                )
                 pText.textSize = style.textSize
                 pBold.textSize = style.sectionSize
                 y += style.titleSize + style.subSize + 12f
             }
 
-            // クラス見出し（短縮名を利用）
-            val clazzTitle = displayClassName(clazz, tType)
-            c.drawText("${clazzTitle}クラス", style.margin, y + style.sectionSize, pBold)
+            // クラス見出し（日本語フル表記）
+            val clazzTitle = displayClassTitle(clazz, tType)
+            c.drawText(clazzTitle, style.margin, y + style.sectionSize, pBold)
             y += style.sectionSize + 6f
 
-            // 列幅：名前を広め、No/クラス/順位はやや狭め、S列は均等
+            // 列幅
             val cols = headers.size
             val availW = pageW - style.margin * 2
             val weight = FloatArray(cols) { 1f }
             headers.forEachIndexed { i, h ->
                 when (h) {
-                    "名前"  -> weight[i] = 2.2f
-                    "No"   -> weight[i] = 1.1f
-                    "クラス","順位" -> weight[i] = 1.2f
+                    "名前" -> weight[i] = 2.2f
+                    "No" -> weight[i] = 1.1f
+                    "クラス", "順位" -> weight[i] = 1.2f
                 }
             }
             val weightSum = weight.sum()
             val colW = FloatArray(cols) { wIndex -> availW * (weight[wIndex] / weightSum) }
 
-            // 行高
-            val rowH = (style.textSize + style.padY * 2 + 6f)
+            // 行高（小数累積を避けて整数化）
+            val rowH = kotlin.math.ceil(style.textSize + style.padY * 2 + 6f).toFloat()
 
             // ヘッダ行（背景＋見出し）
             pFill.color = style.headerBg
@@ -814,13 +634,9 @@ object PrintableExporter {
                 drawCellText(c, h, x, colW[i], baseline, CellAlign.CENTER, pBold, style.padX)
                 x += colW[i]
             }
-            // ヘッダ直下のみ太線（それ以外の行罫線は細線）
-            val strokeThin = 1f
-            val strokeBold = 2.4f
-            pGrid.strokeWidth = strokeBold
-            c.drawLine(style.margin, y + rowH, style.margin + availW, y + rowH, pGrid)
-            // reset to thin for following lines
-            pGrid.strokeWidth = strokeThin
+            // ヘッダ直下のみ太線（矩形描画でブレを防止）
+            val boldPt = 1.6f
+            hLine(c, style.margin, style.margin + availW, y + rowH, boldPt)
             y += rowH
 
             // データ行
@@ -830,23 +646,19 @@ object PrintableExporter {
                     pFill.color = style.zebraBg
                     c.drawRect(style.margin, y, style.margin + availW, y + rowH, pFill)
                 }
-                // 横罫（細線）
-                pGrid.strokeWidth = 1f
-                c.drawLine(style.margin, y + rowH, style.margin + availW, y + rowH, pGrid)
 
                 // セル描画
                 x = style.margin
                 headers.indices.forEach { i ->
                     var cell = row.getOrNull(keepIdx[i])?.trim()?.trim('"').orEmpty()
-                    // クラス列だけ短縮表記に
                     if (headers[i] == "クラス") {
                         val tt = prefs.getString("tournamentType", "beginner") ?: "beginner"
                         cell = displayClassName(cell, tt)
                     }
                     val baseline = y + rowH - style.padY - 3f
                     val align = when (headers[i]) {
-                        "名前" -> CellAlign.LEFT           // 名前だけ左寄せで重なり回避
-                        else   -> CellAlign.CENTER         // それ以外は中央寄せ
+                        "名前" -> CellAlign.LEFT
+                        else -> CellAlign.CENTER
                     }
                     drawCellText(c, cell, x, colW[i], baseline, align, pText, style.padX)
                     x += colW[i]
@@ -870,6 +682,10 @@ object PrintableExporter {
         val name = "result_${pattern.patternCode}_${todayName()}_print.pdf"
         val uri = writeToDownloads(context, name, "application/pdf", bos.toByteArray())
         anySaved = uri != null
-        Toast.makeText(context, if (anySaved) "✅ PDFを保存しました（Downloads/ResultReader）" else "❌ PDF出力失敗", Toast.LENGTH_SHORT).show()
+        Toast.makeText(
+            context,
+            if (anySaved) "✅ PDFを保存しました（Downloads/ResultReader）" else "❌ PDF出力失敗",
+            Toast.LENGTH_SHORT
+        ).show()
     }
 }

@@ -439,20 +439,14 @@ class CameraActivity : AppCompatActivity() {
         previewView = findViewById(R.id.previewView)
 
         // 追加: 掲示用出力ボタンのクリックリスナー（R生成前の環境でも安全に動作するよう動的取得）
-        val exportHtmlButtonId = resources.getIdentifier("exportHtmlButton", "id", packageName)
-        if (exportHtmlButtonId != 0) {
-            val exportHtmlButton: Button? = findViewById(exportHtmlButtonId)
-            exportHtmlButton?.setOnClickListener {
-                PrintableExporter.exportPrintableHtmlToDownloads(this, selectedPattern)
-            }
-        }
-
         val exportS1ButtonId = resources.getIdentifier("exportS1Button", "id", packageName)
         if (exportS1ButtonId != 0) {
             val exportS1Button: Button? = findViewById(exportS1ButtonId)
             exportS1Button?.setOnClickListener {
                 PrintableExporter.exportS1CsvToDownloads(this, selectedPattern)
             }
+            // hide visible HTML button if exists
+            findViewById<View?>(exportS1ButtonId)?.visibility = View.VISIBLE
         }
 
         // 追加: 安全に btnExportS1Csv / btnExportHtml / btnExportPdf にハンドラを登録（IDがあれば動作）
@@ -463,17 +457,18 @@ class CameraActivity : AppCompatActivity() {
             }
         }
 
+        // HTML and older PDF buttons are disabled/hidden. Hook unified Canvas exporter if legacy IDs used.
         val idBtnExportHtml = resources.getIdentifier("btnExportHtml", "id", packageName)
         if (idBtnExportHtml != 0) {
             findViewById<ImageButton?>(idBtnExportHtml)?.setOnClickListener {
-                PrintableExporter.exportPrintableHtmlToDownloads(this, selectedPattern)
+                PrintableExporter.exportPrintablePdfStyledFromCsv(this, selectedPattern, rowsPerPage = 15)
             }
         }
 
         val idBtnExportPdf = resources.getIdentifier("btnExportPdf", "id", packageName)
         if (idBtnExportPdf != 0) {
             findViewById<ImageButton?>(idBtnExportPdf)?.setOnClickListener {
-                PrintableExporter.exportPrintablePdfToDownloads(this, selectedPattern)
+                PrintableExporter.exportPrintablePdfStyledFromCsv(this, selectedPattern, rowsPerPage = 15)
             }
         }
 
@@ -829,25 +824,22 @@ class CameraActivity : AppCompatActivity() {
         // --- 追記: 右上のCSVボタン候補を探索し、長押しで出力メニューを表示 ---
         fun setupExportLongPress(anchor: View) {
             val popup = PopupMenu(this, anchor)
-            popup.menu.add(0, 1, 0, "掲示用HTMLを保存（S1）")
-            popup.menu.add(0, 2, 1, "掲示用PDFを保存（A4横・S1）")
-            popup.menu.add(0, 3, 2, "S1版CSVを保存")
+
+            popup.menu.add(0, 3, 2, "CSVを保存")
             // Canvasベースの安定版PDF出力を追加
-            popup.menu.add(0, 5, 3, "PDF（Canvas/安定版）")
+            popup.menu.add(0, 5, 3, "PDFを保存（Canvas）")
             // optional: popup.menu.add(0, 4, 3, "PDFを開く/印刷")
 
             popup.setOnMenuItemClickListener { item ->
-                when (item.itemId) {
+                 when (item.itemId) {
                     1 -> {
-                        PrintableExporter.exportPrintableHtmlToDownloads(this, selectedPattern)
+                        // S1版CSV（HTML path removed; keep S1 CSV)
+                        PrintableExporter.exportS1CsvToDownloads(this, selectedPattern)
                         true
                     }
                     2 -> {
-                        PrintableExporter.exportPrintablePdfPerClassSinglePage(
-                            context = this,
-                            pattern = selectedPattern,   // ← ここが currentPattern になっていると赤線
-                            rowsTarget = 15              // 読みやすさ重視の15行
-                        )
+                        // Canvas unified PDF (per-class single page behavior folded into unified renderer)
+                        PrintableExporter.exportPrintablePdfStyledFromCsv(this, selectedPattern, rowsPerPage = 15)
                         true
                     }
 
@@ -863,13 +855,13 @@ class CameraActivity : AppCompatActivity() {
                         true
                     }
                     4 -> {
-
-                        PrintableExporter.exportPrintablePdfToDownloads(this, selectedPattern)
+                        // legacy: map to unified Canvas exporter
+                        PrintableExporter.exportPrintablePdfStyledFromCsv(this, selectedPattern, rowsPerPage = 15)
                         true
                     }
-                    else -> false
-                }
-            }
+                     else -> false
+                 }
+             }
 
             popup.show()
         }
