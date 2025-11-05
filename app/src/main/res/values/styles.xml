@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ResultReader" parent="Theme.Material3.Light.NoActionBar">
+        <!-- カスタマイズ可能なスタイル項目（必要に応じて追加） -->
+        <item name="colorPrimary">@color/purple_500</item>
+        <item name="colorPrimaryVariant">@color/purple_700</item>
+        <item name="colorOnPrimary">@color/white</item>
+    </style>
+
+
+    <!-- res/values/styles.xml に追加 -->
+    <style name="ScoreLabelStyle">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:gravity">center</item>
+        <item name="android:textSize">18sp</item>
+        <item name="android:textColor">#000000</item>
+        <item name="android:background">@drawable/score_label_bg</item> <!-- ←これが正解 -->
+    </style>
+
+
+
+
+</resources>

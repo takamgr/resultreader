@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">ResultReader</string>
+
+    <string-array name="pattern_entries">
+        <item>4セク×2ラップ（午前8 / 午後8）</item>
+        <item>5セク×2ラップ（午前10 / 午後10）</item>
+        <item>4セク×3ラップ（午前12 / 午後12）</item>
+    </string-array>
+</resources>
