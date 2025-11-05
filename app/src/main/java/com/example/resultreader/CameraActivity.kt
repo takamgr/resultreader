@@ -832,6 +832,8 @@ class CameraActivity : AppCompatActivity() {
             popup.menu.add(0, 1, 0, "掲示用HTMLを保存（S1）")
             popup.menu.add(0, 2, 1, "掲示用PDFを保存（A4横・S1）")
             popup.menu.add(0, 3, 2, "S1版CSVを保存")
+            // Canvasベースの安定版PDF出力を追加
+            popup.menu.add(0, 5, 3, "PDF（Canvas/安定版）")
             // optional: popup.menu.add(0, 4, 3, "PDFを開く/印刷")
 
             popup.setOnMenuItemClickListener { item ->
@@ -841,15 +843,27 @@ class CameraActivity : AppCompatActivity() {
                         true
                     }
                     2 -> {
-                        PrintableExporter.exportPrintablePdfToDownloads(this, selectedPattern)
+                        PrintableExporter.exportPrintablePdfPerClassSinglePage(
+                            context = this,
+                            pattern = selectedPattern,   // ← ここが currentPattern になっていると赤線
+                            rowsTarget = 15              // 読みやすさ重視の15行
+                        )
                         true
                     }
+
+
+
+                    5 -> {
+                        PrintableExporter.exportPrintablePdfStyledFromCsv(this, selectedPattern)
+                        true
+                    }
+
                     3 -> {
                         PrintableExporter.exportS1CsvToDownloads(this, selectedPattern)
                         true
                     }
                     4 -> {
-                        // 4番もPDF保存のままでOK（別動作にしたいならここで差し替え）
+
                         PrintableExporter.exportPrintablePdfToDownloads(this, selectedPattern)
                         true
                     }
