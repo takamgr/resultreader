@@ -461,14 +461,14 @@ class CameraActivity : AppCompatActivity() {
         val idBtnExportHtml = resources.getIdentifier("btnExportHtml", "id", packageName)
         if (idBtnExportHtml != 0) {
             findViewById<ImageButton?>(idBtnExportHtml)?.setOnClickListener {
-                PrintableExporter.exportPrintablePdfStyledFromCsv(this, selectedPattern, rowsPerPage = 15)
+                PrintableExporter.exportPrintablePdfStyledFromCsv(this, selectedPattern, rowsPerPage = 15, drawRowLines = true)
             }
         }
 
         val idBtnExportPdf = resources.getIdentifier("btnExportPdf", "id", packageName)
         if (idBtnExportPdf != 0) {
             findViewById<ImageButton?>(idBtnExportPdf)?.setOnClickListener {
-                PrintableExporter.exportPrintablePdfStyledFromCsv(this, selectedPattern, rowsPerPage = 15)
+                PrintableExporter.exportPrintablePdfStyledFromCsv(this, selectedPattern, rowsPerPage = 15, drawRowLines = true)
             }
         }
 
@@ -839,14 +839,15 @@ class CameraActivity : AppCompatActivity() {
                     }
                     2 -> {
                         // Canvas unified PDF (per-class single page behavior folded into unified renderer)
-                        PrintableExporter.exportPrintablePdfStyledFromCsv(this, selectedPattern, rowsPerPage = 15)
+                        PrintableExporter.exportPrintablePdfStyledFromCsv(this, selectedPattern, rowsPerPage = 15, drawRowLines = true)
                         true
                     }
 
 
 
                     5 -> {
-                        PrintableExporter.exportPrintablePdfStyledFromCsv(this, selectedPattern)
+                        // Canvas PDF with per-row thin lines enabled for visual verification
+                        PrintableExporter.exportPrintablePdfStyledFromCsv(this, selectedPattern, rowsPerPage = 15, drawRowLines = true)
                         true
                     }
 
@@ -856,7 +857,7 @@ class CameraActivity : AppCompatActivity() {
                     }
                     4 -> {
                         // legacy: map to unified Canvas exporter
-                        PrintableExporter.exportPrintablePdfStyledFromCsv(this, selectedPattern, rowsPerPage = 15)
+                        PrintableExporter.exportPrintablePdfStyledFromCsv(this, selectedPattern, rowsPerPage = 15, drawRowLines = true)
                         true
                     }
                      else -> false

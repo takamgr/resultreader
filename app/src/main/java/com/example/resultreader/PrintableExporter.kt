@@ -300,8 +300,6 @@ object PrintableExporter {
         return ByteArray(0)
     }
 
-    // ---------- Helper for Canvas renderer: snap to 0.5 to avoid hairline blurring
-    private fun snapHalf(v: Float): Float = kotlin.math.floor(v) + 0.5f
 
     // ───────── Downloads/ResultReader 出力 ─────────
 
@@ -468,8 +466,12 @@ object PrintableExporter {
     fun exportPrintablePdfStyledFromCsv(
         context: Context,
         pattern: TournamentPattern,
-        rowsPerPage: Int = 15
+        rowsPerPage: Int = 15,
+        drawRowLines: Boolean = false // default: off to preserve previous appearance
     ) {
+        // debug: entry & option
+        android.util.Log.d("PRINTABLE", "exportPrintablePdfStyledFromCsv start: pattern=${pattern.patternCode} drawRowLines=$drawRowLines")
+
         val src = File(
             context.getExternalFilesDir("ResultReader"),
             "result_${pattern.patternCode}_${todayName()}.csv"
@@ -567,17 +569,25 @@ object PrintableExporter {
         val pLineFill = android.graphics.Paint().apply {
             isAntiAlias = false
             this.style = android.graphics.Paint.Style.FILL
-            color = style.grid
+            // darker grid for better visibility in PDF viewers
+            color = android.graphics.Color.rgb(120, 120, 120)
+            alpha = 0xFF.toInt()
         }
 
-        // 横線は矩形で描く（整数Yにスナップしてサブピクセルの揺れを防止）
-        fun hLine(c: Canvas, x1: Float, x2: Float, y: Float, thickPt: Float) {
-            val yy = y.toInt().toFloat()
-            c.drawRect(x1, yy, x2, yy + thickPt, pLineFill)
-        }
+        // snap helper: floor to integer pixel (Float) — defined here so hLine can call it
+        fun snapHalf(v: Float): Float = kotlin.math.floor(v).toFloat()
 
-        // 1px線をクッキリ出すために 0.5 にスナップ
-        fun snapHalf(v: Float) = kotlin.math.floor(v) + 0.5f
+         // 横線は矩形で描く（整数Yにスナップしてサブピクセルの揺れを防止）
+         fun hLine(c: Canvas, x1: Float, x2: Float, y: Float, thickPt: Float) {
+             // draw line centered on y (offset by half thickness) and snap to 0.5 to avoid blurring
+             val yy = snapHalf(y - thickPt / 2f).coerceAtLeast(0f)
+             // clamp to printable area (avoid drawing outside page or under footer)
+             val maxY = (pageH - style.margin).toFloat()
+             if (yy > maxY) return
+             val drawH = if (yy + thickPt > maxY) (maxY - yy).coerceAtLeast(0f) else thickPt
+             if (drawH <= 0f) return
+             c.drawRect(x1, yy, x2, yy + drawH, pLineFill)
+         }
 
         fun drawPage(clazz: String, rows: List<List<String>>, firstPage: Boolean) {
             val page = pdf.startPage(
@@ -585,6 +595,8 @@ object PrintableExporter {
             )
             val c = page.canvas
             var y = style.margin
+            // track drawn horizontal line positions (quantized keys) to avoid double-drawing/overlap
+            val drawnYKeys = mutableSetOf<Int>()
 
             // タイトル（1ページ目だけ） --- 大会名/開催日/形式をPrefsから表示
             if (firstPage) {
@@ -637,14 +649,23 @@ object PrintableExporter {
             // ヘッダ直下のみ太線（矩形描画でブレを防止）
             val boldPt = 1.6f
             hLine(c, style.margin, style.margin + availW, y + rowH, boldPt)
+            // record header line into key set to prevent duplicate draws
+            run {
+                val center = snapHalf(y + rowH - boldPt / 2f)
+                val key = (center * 100f).toInt() // higher precision key
+                drawnYKeys.add(key)
+            }
             y += rowH
 
             // データ行
+            val rowsStartY = y // top Y of first data row
             rows.forEachIndexed { r, row ->
                 // ゼブラ
                 if (r % 2 == 1) {
                     pFill.color = style.zebraBg
-                    c.drawRect(style.margin, y, style.margin + availW, y + rowH, pFill)
+                    // inset top and bottom by a tiny amount so it doesn't overpaint horizontal lines
+                    val lineInset = 0.5f
+                    c.drawRect(style.margin, y + lineInset, style.margin + availW, y + rowH - lineInset, pFill)
                 }
 
                 // セル描画
@@ -664,6 +685,23 @@ object PrintableExporter {
                     x += colW[i]
                 }
                 y += rowH
+            }
+
+            // 後処理：行ごとの底辺位置に沿って一度だけ横線を描く（位置の一貫化）
+            if (drawRowLines) {
+                val thinPt = 0.8f
+                for (i in rows.indices) {
+                    val lineY = rowsStartY + rowH * (i + 1)
+                    val candidateCenter = snapHalf(lineY - thinPt / 2f)
+                    val key = (candidateCenter * 100f).toInt()
+                    if (!drawnYKeys.contains(key)) {
+                        android.util.Log.d("PRINTABLE", "drawRowLine post i=$i lineY=$lineY key=$key")
+                        hLine(c, style.margin, style.margin + availW, lineY, thinPt)
+                        drawnYKeys.add(key)
+                    } else {
+                        android.util.Log.d("PRINTABLE", "skip duplicate post i=$i lineY=$lineY key=$key")
+                    }
+                }
             }
 
             pdf.finishPage(page)
