@@ -1,4 +1,4 @@
-@file:Suppress("unused", "RedundantInitialiser", "UNUSED_PARAMETER", "RemoveRedundantElse")
+@file:Suppress("unused", "RedundantInitialiser", "UNUSED_PARAMETER", "RemoveRedundantElse", "RedundantCallOfConversionMethod")
 
 package com.example.resultreader
 
@@ -726,4 +726,207 @@ object PrintableExporter {
             Toast.LENGTH_SHORT
         ).show()
     }
+    // ── 追加：クラスごとに別PDFで出力（ロール紙向け）
+    fun exportPrintablePdfStyledSplitByClass(
+        context: Context,
+        pattern: TournamentPattern,
+        rowsPerPage: Int = 15
+    ) {
+        val src = File(
+            context.getExternalFilesDir("ResultReader"),
+            "result_${pattern.patternCode}_${todayName()}.csv"
+        )
+        if (!src.exists()) {
+            Toast.makeText(context, "本日のCSVが見つかりません", Toast.LENGTH_SHORT).show(); return
+        }
+        val lines = src.readLines(Charsets.UTF_8)
+        if (lines.isEmpty()) return
+
+        // ヘッダ整形（Class列は非表示にしている点は既存と同じ）
+        fun jpHeader(hRaw: String): String {
+            val h = hRaw.trim().removePrefix("\uFEFF").trim('"')
+            return when (h) {
+                "EntryNo" -> "No"
+                "Name" -> "名前"
+                "Class" -> "" // ← テーブルからは非表示
+                "AmG" -> "AG"
+                "AmC" -> "AC"
+                "AmRank" -> "A順"
+                "PmG" -> "PG"
+                "PmC" -> "PC"
+                "PmRank" -> "P順"
+                "TotalG" -> "TG"
+                "TotalC" -> "TC"
+                "TotalRank" -> "順位"
+                "時刻", "入力", "セッション" -> ""
+                else -> Regex("""^Sec0*(\d{1,2})$""").matchEntire(h)?.let { "S${it.groupValues[1].toInt()}" } ?: h
+            }
+        }
+
+        val headerRaw = lines.first().split(",").map { it.trim().removePrefix("\uFEFF") }
+        val keepIdx   = headerRaw.mapIndexedNotNull { i, h -> jpHeader(h).ifBlank { null }?.let { i } }
+        val headers   = keepIdx.map { jpHeader(headerRaw[it]) }
+        val rowsAll   = lines.drop(1).map { it.split(",") }
+
+        val secCount = headers.count { it.matches(Regex("^S\\d+$")) }
+        val style = if (secCount >= 24)
+            TableStyle(textSize = 9.5f, padX = 3f, padY = 3f)
+        else
+            TableStyle()
+
+        val prefs = context.getSharedPreferences("ResultReaderPrefs", Context.MODE_PRIVATE)
+        val tournamentType = prefs.getString("tournamentType", "beginner") ?: "beginner"
+
+        val classIdx = headerRaw.indexOf("Class")
+        val grouped  = rowsAll.groupBy { it.getOrNull(classIdx) ?: "" }
+
+        // 表示順
+        val order = if (tournamentType == "championship")
+            listOf("IA", "IB", "NA", "NB")
+        else
+            listOf("オープン", "ビギナー")
+
+        val classes = buildList {
+            addAll(order)
+            addAll(grouped.keys.filter { it.isNotBlank() && it !in order }.sorted())
+        }
+
+        // 罫線用（にじみ防止：横線は塗り矩形）
+        val pText = android.graphics.Paint().apply {
+            isAntiAlias = true; color = style.text; textSize = style.textSize
+            typeface = condensed(); this.style = android.graphics.Paint.Style.FILL
+        }
+        val pBold = android.graphics.Paint(pText).apply { isFakeBoldText = false }
+        val pFill = android.graphics.Paint().apply { isAntiAlias = true }
+        val pGrid = android.graphics.Paint().apply {
+            isAntiAlias = false; color = style.grid; strokeWidth = 1f
+            strokeCap = android.graphics.Paint.Cap.BUTT
+            strokeJoin = android.graphics.Paint.Join.MITER
+            this.style = android.graphics.Paint.Style.STROKE
+        }
+        val pLineFill = android.graphics.Paint().apply {
+            isAntiAlias = false; this.style = android.graphics.Paint.Style.FILL; color = style.grid
+        }
+        fun hLine(c: Canvas, x1: Float, x2: Float, y: Float, thickPt: Float) {
+            val yy = y.toInt().toFloat()
+            c.drawRect(x1, yy, x2, yy + thickPt, pLineFill)
+        }
+        fun snapHalf(v: Float): Float = kotlin.math.floor(v.toDouble()).toFloat() + 0.5f
+
+        val pageW = 842; val pageH = 595
+        val boldPt = 1.6f
+        val thinPt = 0.8f
+
+        fun drawPage(c: Canvas, clazz: String, rows: List<List<String>>, firstPage: Boolean) {
+            var y = style.margin
+
+            // タイトル（最初のページだけ）
+            if (firstPage) {
+                pBold.textSize = style.titleSize
+                c.drawText(tournamentName(context), style.margin, y + style.titleSize, pBold)
+                pText.textSize = style.subSize
+                c.drawText(
+                    "日付: ${eventDateDisplay(context)}   形式: ${formatText(pattern)}",
+                    style.margin, y + style.titleSize + style.subSize + 6f, pText
+                )
+                pText.textSize = style.textSize
+                pBold.textSize = style.sectionSize
+                y += style.titleSize + style.subSize + 12f
+            }
+
+            // クラス見出し（日本語フル）
+            c.drawText(displayClassTitle(clazz, tournamentType), style.margin, y + style.sectionSize, pBold)
+            y += style.sectionSize + 6f
+
+            // 列幅
+            val cols = headers.size
+            val availW = pageW - style.margin * 2
+            val weight = FloatArray(cols) { 1f }.apply {
+                headers.forEachIndexed { i, h ->
+                    when (h) {
+                        "名前" -> this[i] = 2.2f
+                        "No"   -> this[i] = 1.1f
+                        "順位" -> this[i] = 1.2f
+                    }
+                }
+            }
+            val sum = weight.sum()
+            val colW = FloatArray(cols) { i -> availW * (weight[i] / sum) }
+
+            val rowH = kotlin.math.ceil(style.textSize + style.padY * 2 + 6f).toFloat()
+
+            // ヘッダ行
+            pFill.color = style.headerBg
+            c.drawRect(style.margin, y, style.margin + availW, y + rowH, pFill)
+            var x = style.margin
+            headers.forEachIndexed { i, h ->
+                val baseline = y + rowH - style.padY - 3f
+                val w = colW[i]
+                val cx = x + (w - pBold.measureText(h)) / 2f
+                c.drawText(h, cx, baseline, pBold)
+                x += w
+            }
+            // ヘッダ下線は太め
+            hLine(c, style.margin, style.margin + availW, y + rowH, boldPt)
+            y += rowH
+
+            // データ行
+            rows.forEachIndexed { r, row ->
+                // ゼブラ
+                if (r % 2 == 1) {
+                    pFill.color = style.zebraBg
+                    c.drawRect(style.margin, y, style.margin + availW, y + rowH, pFill)
+                }
+                // 1行目はヘッダ線があるのでスキップ、それ以外は細線
+                if (r > 0) {
+                    pGrid.strokeWidth = thinPt
+                    c.drawLine(style.margin, snapHalf(y + rowH), style.margin + availW, snapHalf(y + rowH), pGrid)
+                }
+
+                // セル
+                x = style.margin
+                headers.indices.forEach { i ->
+                    val cell = row.getOrNull(keepIdx[i])?.trim()?.trim('"').orEmpty()
+                    val baseline = y + rowH - style.padY - 3f
+                    // 名前だけ左寄せ、他は中央
+                    val textWidth = pText.measureText(cell)
+                    val drawX = if (headers[i] == "名前")
+                        x + style.padX
+                    else
+                        x + (colW[i] - textWidth) / 2f
+                    c.drawText(cell, drawX, baseline, pText)
+                    x += colW[i]
+                }
+                y += rowH
+            }
+        }
+
+        var saved = false
+        for (clazz in classes) {
+            val list = grouped[clazz].orEmpty()
+            if (list.isEmpty()) continue
+
+            val pdf = PdfDocument()
+            list.chunked(rowsPerPage).forEachIndexed { pi, chunk ->
+                val page = pdf.startPage(PdfDocument.PageInfo.Builder(pageW, pageH, pi + 1).create())
+                drawPage(page.canvas, clazz, chunk, firstPage = (pi == 0))
+                pdf.finishPage(page)
+            }
+
+            val name = "result_${pattern.patternCode}_${todayName()}_${displayClassTitle(clazz, tournamentType)}.pdf"
+            val bos = ByteArrayOutputStream()
+            pdf.writeTo(bos)
+            pdf.close()
+            if (writeToDownloads(context, name, "application/pdf", bos.toByteArray()) != null) {
+                saved = true
+            }
+        }
+
+        Toast.makeText(
+            context,
+            if (saved) "✅ クラス別PDF（1クラス=1ファイル）を保存しました" else "❌ PDF出力なし",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
 }
