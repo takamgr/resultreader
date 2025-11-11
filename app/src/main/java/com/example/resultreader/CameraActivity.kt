@@ -111,8 +111,8 @@ class CameraActivity : AppCompatActivity() {
     // C案: OCRで直近にEntryNoが読めたか／画面にスコア解析結果があるか
     private var lastOcrHadEntry: Boolean = false  // 直近のOCRでEntryNoが読めたか
     private var hasScoreResult: Boolean = false   // 画面にスコア解析結果が出ているか
-
-
+    // 現在画面に表示されているエントリのクラス（UIで上書き可能）
+    private var currentRowClass: String? = null
     private val entryListPickerLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) {
@@ -431,6 +431,9 @@ class CameraActivity : AppCompatActivity() {
         // 追加: EntryNo を手入力で修正できるようにする
         resultText.setOnClickListener { showEntryNoEditDialog() }
         resultText.setOnLongClickListener { showEntryNoEditDialog(); true }
+        // 追加: tournamentInfoText を長押し/タップでクラス編集ダイアログを開く
+        tournamentInfoText.setOnClickListener { showClassPickerDialog() }
+        tournamentInfoText.setOnLongClickListener { showClassPickerDialog(); true }
         prepareButton = findViewById(R.id.prepareButton)
         confirmButton = findViewById(R.id.confirmButton)
         flashToggleButton = findViewById(R.id.flashToggleButton)
@@ -548,41 +551,41 @@ class CameraActivity : AppCompatActivity() {
                     AlertDialog.Builder(this)
                         .setTitle(fileTarget.name)
                         .setItems(items) { d, which ->
-                            when (which) {
-                                0 -> { // 開く
-                                    openCsvFile(fileTarget)
-                                }
-                                1 -> { // ダウンロードへコピー
-                                    val uri = copyToDownloads(fileTarget)
-                                    if (uri != null) {
-                                        Toast.makeText(this, "📂 ダウンロードにコピーしました\n${fileTarget.name}", Toast.LENGTH_LONG).show()
-                                    } else {
-                                        Toast.makeText(this, "コピーに失敗しました", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                                2 -> { // 共有
-                                    shareCsvFile(fileTarget)
-                                }
-                                3 -> { // 削除（既存仕様を維持）
-                                    AlertDialog.Builder(this)
-                                        .setTitle("削除確認")
-                                        .setMessage("「${fileTarget.name}」を削除しますか？")
-                                        .setPositiveButton("削除") { _, _ ->
-                                            if (fileTarget.delete()) {
-                                                Toast.makeText(this, "削除しました", Toast.LENGTH_SHORT).show()
-                                                // 一覧更新
-                                                findViewById<ImageButton>(R.id.openCsvImageButton).performClick()
-                                            } else {
-                                                Toast.makeText(this, "削除に失敗しました", Toast.LENGTH_SHORT).show()
-                                            }
-                                            dialog.dismiss()
-                                        }
-                                        .setNegativeButton("キャンセル", null)
-                                        .show()
-                                }
-                                else -> d.dismiss()
-                            }
-                        }
+                             when (which) {
+                                 0 -> { // 開く
+                                     openCsvFile(fileTarget)
+                                 }
+                                 1 -> { // ダウンロードへコピー
+                                     val uri = copyToDownloads(fileTarget)
+                                     if (uri != null) {
+                                         Toast.makeText(this, "📂 ダウンロードにコピーしました\n${fileTarget.name}", Toast.LENGTH_LONG).show()
+                                     } else {
+                                         Toast.makeText(this, "コピーに失敗しました", Toast.LENGTH_SHORT).show()
+                                     }
+                                 }
+                                 2 -> { // 共有
+                                     shareCsvFile(fileTarget)
+                                 }
+                                 3 -> { // 削除（既存仕様を維持）
+                                     AlertDialog.Builder(this)
+                                         .setTitle("削除確認")
+                                         .setMessage("「${fileTarget.name}」を削除しますか？")
+                                         .setPositiveButton("削除") { _, _ ->
+                                             if (fileTarget.delete()) {
+                                                 Toast.makeText(this, "削除しました", Toast.LENGTH_SHORT).show()
+                                                 // 一覧更新
+                                                 findViewById<ImageButton>(R.id.openCsvImageButton).performClick()
+                                             } else {
+                                                 Toast.makeText(this, "削除に失敗しました", Toast.LENGTH_SHORT).show()
+                                             }
+                                             dialog.dismiss()
+                                         }
+                                         .setNegativeButton("キャンセル", null)
+                                         .show()
+                                 }
+                                 else -> d.dismiss()
+                             }
+                         }
                         .show()
 
                     true
@@ -908,6 +911,19 @@ class CameraActivity : AppCompatActivity() {
             val isManual = resultText.background != null &&
                     (resultText.background as? ColorDrawable)?.color == Color.parseColor("#FFE599")
 
+            // entryMap を上書きコピーして currentRowClass があればそれを優先して渡す
+            // ただし、手動でクラスを指定した場合に該当EntryNoがエントリーリストに無ければ保存を拒否
+            if (currentRowClass != null && !entryMap.containsKey(entryNumber)) {
+                Toast.makeText(this, "⚠️ エントリーが未登録のためクラスを変更できません", Toast.LENGTH_LONG).show()
+                return@let
+            }
+            val effectiveEntryMap = entryMap.toMutableMap()
+            if (currentRowClass != null) {
+                val existing = entryMap[entryNumber]
+                val name = existing?.first ?: ""
+                effectiveEntryMap[entryNumber] = Pair(name, currentRowClass!!)
+            }
+
             CsvExporter.appendResultToCsv(
                 context = this,
                 currentSession = currentSession,
@@ -920,13 +936,16 @@ class CameraActivity : AppCompatActivity() {
                 isManual = isManual,
                 amCount = amCount,
                 pattern = selectedPattern,
-                entryMap = entryMap
+                entryMap = effectiveEntryMap
             )
 
             guideOverlay.setDetected("red")
             confirmButton.visibility = View.GONE
-        }
-    }
+            // 保存完了後は画面上の手動クラス指定をクリアしておく
+            currentRowClass = null
+            updateTournamentInfoText()
+         }
+     }
 
 
 
@@ -1148,8 +1167,15 @@ class CameraActivity : AppCompatActivity() {
                     if (entry != null) {
                         val (name, clazz) = entry
                         Toast.makeText(this, "✅ $name さん [$clazz]", Toast.LENGTH_SHORT).show()
+                        // 現在行のクラスをセットして UI に反映
+                        currentRowClass = clazz
+                        // tournamentInfoText にクラスを追加表示（既存表示を壊さない）。ここではローカルprefsを使う
+                        val prefsLocal = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
+                        val typeLabel = if (prefsLocal.getString("tournamentType", "unknown") == "championship") "選手権" else "ビギナー"
+                        tournamentInfoText.text = "${selectedPattern.patternCode} / $currentSession / $typeLabel / ${currentRowClass ?: "-"}"
                     } else {
                         Toast.makeText(this, "⚠️ EntryNo=$entryNumber は未登録です", Toast.LENGTH_LONG).show()
+                        currentRowClass = null
                     }
 
                     val scoreX = 570
@@ -1477,8 +1503,6 @@ class CameraActivity : AppCompatActivity() {
             amButton.setBackgroundColor(Color.LTGRAY)
             amButton.setTextColor(Color.BLACK)
 
-
-
         }
     }
     private fun openCsvFile(file: File) {
@@ -1579,8 +1603,11 @@ class CameraActivity : AppCompatActivity() {
                 if (entry != null) {
                     val (name, clazz) = entry
                     Toast.makeText(this, "✅ $name さん [$clazz] を選択", Toast.LENGTH_SHORT).show()
+                    currentRowClass = clazz
+                    tournamentInfoText.text = "${selectedPattern.patternCode} / $currentSession / ${currentRowClass ?: "-"}"
                 } else {
                     Toast.makeText(this, "⚠️ EntryNo=$no は未登録です（保存時は拒否されます）", Toast.LENGTH_LONG).show()
+                    currentRowClass = null
                 }
 
                 // C案: OCRで直近に番号が読めていたかどうかで分岐
@@ -1723,5 +1750,30 @@ class CameraActivity : AppCompatActivity() {
         scorePreview.visibility = View.GONE
 
         takeNext(0)
+    }
+
+    // クラス編集ダイアログ（Prefs の大会種別に応じた選択肢）
+    private fun showClassPickerDialog() {
+        val prefs = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
+        val tType = prefs.getString("tournamentType", "beginner") ?: "beginner"
+        val options = when (tType) {
+            "championship" -> arrayOf("IA", "IB", "NA", "NB")
+            else -> arrayOf("オープン", "ビギナー")
+        }
+
+        val currentIndex = options.indexOf(currentRowClass).coerceAtLeast(0)
+
+        AlertDialog.Builder(this)
+            .setTitle("クラスを選択")
+            .setSingleChoiceItems(options, currentIndex) { dialog, which ->
+                val selected = options[which]
+                currentRowClass = selected
+                // UI 表示を更新
+                tournamentInfoText.text = "${selectedPattern.patternCode} / $currentSession / ${currentRowClass ?: "-"}"
+                Toast.makeText(this, "クラスを $selected に変更しました", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+            }
+            .setNegativeButton("キャンセル", null)
+            .show()
     }
 }
