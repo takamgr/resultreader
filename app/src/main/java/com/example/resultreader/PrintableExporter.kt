@@ -577,12 +577,10 @@ object PrintableExporter {
         // snap helper: floor to integer pixel (Float) — defined here so hLine can call it
         fun snapHalf(v: Float): Float = kotlin.math.floor(v).toFloat()
 
-         // 横線は矩形で描く（整数Yにスナップしてサブピクセルの揺れを防止）
+         // 横線は矩形で描く（丸めたY座標で矩形を描く）
          fun hLine(c: Canvas, x1: Float, x2: Float, y: Float, thickPt: Float) {
-             // draw line centered on y (offset by half thickness) and snap to 0.5 to avoid blurring
-             val yy = snapHalf(y - thickPt / 2f).coerceAtLeast(0f)
-             // clamp to printable area (avoid drawing outside page or under footer)
-             val maxY = (pageH - style.margin).toFloat()
+             val yy = kotlin.math.round(y).toFloat().coerceAtLeast(0f)
+             val maxY = (pageH - style.margin)
              if (yy > maxY) return
              val drawH = if (yy + thickPt > maxY) (maxY - yy).coerceAtLeast(0f) else thickPt
              if (drawH <= 0f) return
@@ -595,8 +593,6 @@ object PrintableExporter {
             )
             val c = page.canvas
             var y = style.margin
-            // track drawn horizontal line positions (quantized keys) to avoid double-drawing/overlap
-            val drawnYKeys = mutableSetOf<Int>()
 
             // タイトル（1ページ目だけ） --- 大会名/開催日/形式をPrefsから表示
             if (firstPage) {
@@ -649,22 +645,18 @@ object PrintableExporter {
             // ヘッダ直下のみ太線（矩形描画でブレを防止）
             val boldPt = 1.6f
             hLine(c, style.margin, style.margin + availW, y + rowH, boldPt)
-            // record header line into key set to prevent duplicate draws
-            run {
-                val center = snapHalf(y + rowH - boldPt / 2f)
-                val key = (center * 100f).toInt() // higher precision key
-                drawnYKeys.add(key)
-            }
+            // 記録: ヘッダ直下のY（thin線スキップ判定用）
+            val headerLineY = y + rowH
             y += rowH
 
             // データ行
+            val thinPt = 1.0f
             val rowsStartY = y // top Y of first data row
             rows.forEachIndexed { r, row ->
-                // ゼブラ
+                // ゼブラ（上側を薄線分だけ詰めて描画し、次行のゼブラで下線が隠れないようにする）
                 if (r % 2 == 1) {
                     pFill.color = style.zebraBg
-                    // inset top and bottom by a tiny amount so it doesn't overpaint horizontal lines
-                    val lineInset = 0.5f
+                    val lineInset = thinPt
                     c.drawRect(style.margin, y + lineInset, style.margin + availW, y + rowH - lineInset, pFill)
                 }
 
@@ -684,25 +676,16 @@ object PrintableExporter {
                     drawCellText(c, cell, x, colW[i], baseline, align, pText, style.padX)
                     x += colW[i]
                 }
+
+                // 横線を各行ごとに確実に描画（各データ行に薄線を必ず引く）
+                val thinPt = 1.0f
+                val lineY = y + rowH
+                android.util.Log.d("PRINTABLE", "draw thin line row=$r lineY=$lineY")
+                hLine(c, style.margin, style.margin + availW, lineY, thinPt)
                 y += rowH
             }
 
-            // 後処理：行ごとの底辺位置に沿って一度だけ横線を描く（位置の一貫化）
-            if (drawRowLines) {
-                val thinPt = 0.8f
-                for (i in rows.indices) {
-                    val lineY = rowsStartY + rowH * (i + 1)
-                    val candidateCenter = snapHalf(lineY - thinPt / 2f)
-                    val key = (candidateCenter * 100f).toInt()
-                    if (!drawnYKeys.contains(key)) {
-                        android.util.Log.d("PRINTABLE", "drawRowLine post i=$i lineY=$lineY key=$key")
-                        hLine(c, style.margin, style.margin + availW, lineY, thinPt)
-                        drawnYKeys.add(key)
-                    } else {
-                        android.util.Log.d("PRINTABLE", "skip duplicate post i=$i lineY=$lineY key=$key")
-                    }
-                }
-            }
+            // ※ ポスト描画は廃止。各行内で1回だけ描画済み。
 
             pdf.finishPage(page)
         }
@@ -791,6 +774,9 @@ object PrintableExporter {
             addAll(grouped.keys.filter { it.isNotBlank() && it !in order }.sorted())
         }
 
+        // A4 サイズ（ポイント）
+        val pageW = 842; val pageH = 595
+
         // 罫線用（にじみ防止：横線は塗り矩形）
         val pText = android.graphics.Paint().apply {
             isAntiAlias = true; color = style.text; textSize = style.textSize
@@ -808,14 +794,17 @@ object PrintableExporter {
             isAntiAlias = false; this.style = android.graphics.Paint.Style.FILL; color = style.grid
         }
         fun hLine(c: Canvas, x1: Float, x2: Float, y: Float, thickPt: Float) {
-            val yy = y.toInt().toFloat()
-            c.drawRect(x1, yy, x2, yy + thickPt, pLineFill)
+            val yy = kotlin.math.round(y).toFloat().coerceAtLeast(0f)
+            val maxY = (pageH - style.margin)
+            if (yy > maxY) return
+            val drawH = if (yy + thickPt > maxY) (maxY - yy).coerceAtLeast(0f) else thickPt
+            if (drawH <= 0f) return
+            c.drawRect(x1, yy, x2, yy + drawH, pLineFill)
         }
         fun snapHalf(v: Float): Float = kotlin.math.floor(v.toDouble()).toFloat() + 0.5f
 
-        val pageW = 842; val pageH = 595
         val boldPt = 1.6f
-        val thinPt = 0.8f
+        val thinPt = 1.0f
 
         fun drawPage(c: Canvas, clazz: String, rows: List<List<String>>, firstPage: Boolean) {
             var y = style.margin
@@ -868,19 +857,17 @@ object PrintableExporter {
             }
             // ヘッダ下線は太め
             hLine(c, style.margin, style.margin + availW, y + rowH, boldPt)
+            // 記録: ヘッダ直下のY（thin線スキップ判定用）
+            val headerLineY = y + rowH
             y += rowH
 
             // データ行
             rows.forEachIndexed { r, row ->
-                // ゼブラ
+                // ゼブラ（上側を薄線分だけ詰めて描画し、前行の下線が隠れないようにする）
                 if (r % 2 == 1) {
                     pFill.color = style.zebraBg
-                    c.drawRect(style.margin, y, style.margin + availW, y + rowH, pFill)
-                }
-                // 1行目はヘッダ線があるのでスキップ、それ以外は細線
-                if (r > 0) {
-                    pGrid.strokeWidth = thinPt
-                    c.drawLine(style.margin, snapHalf(y + rowH), style.margin + availW, snapHalf(y + rowH), pGrid)
+                    val lineInset = thinPt
+                    c.drawRect(style.margin, y + lineInset, style.margin + availW, y + rowH - lineInset, pFill)
                 }
 
                 // セル
@@ -897,6 +884,12 @@ object PrintableExporter {
                     c.drawText(cell, drawX, baseline, pText)
                     x += colW[i]
                 }
+
+                // 各行の底辺に対して確実に細線を描画（各データ行に薄線を必ず引く）
+                val thinPtLocal = thinPt
+                val lineY = y + rowH
+                android.util.Log.d("PRINTABLE", "draw thin line (split) row=$r lineY=$lineY")
+                hLine(c, style.margin, style.margin + availW, lineY, thinPtLocal)
                 y += rowH
             }
         }
