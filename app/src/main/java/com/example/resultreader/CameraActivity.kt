@@ -884,8 +884,10 @@ class CameraActivity : AppCompatActivity() {
 
     private fun proceedWithSave(entryNumber: Int) {
         pendingSaveBitmap?.let {
+            // 1) 認識画像の保存（既存）
             saveImage(it)
 
+            // 2) セクション数の算出（既存ロジック）
             val amCount = when (selectedPattern) {
                 TournamentPattern.PATTERN_4x2 -> 8
                 TournamentPattern.PATTERN_4x3 -> 12
@@ -894,6 +896,7 @@ class CameraActivity : AppCompatActivity() {
             val totalCount = amCount * 2
             val pmCount = totalCount - amCount
 
+            // 3) AM/PM に応じてスコア配列を構成（既存ロジック）
             val scoreList = when (currentSession) {
                 "AM" -> scoreLabelViews.map { it.text.toString().toIntOrNull() } + List(pmCount) { null }
                 "PM" -> List(amCount) { null } + scoreLabelViews.map { it.text.toString().toIntOrNull() }
@@ -908,15 +911,17 @@ class CameraActivity : AppCompatActivity() {
             val pmScore = pmScores.filterNotNull().sum()
             val pmClean = pmScores.count { it == 0 }
 
+            // 4) 手入力（黄色背景）判定（既存）
             val isManual = resultText.background != null &&
                     (resultText.background as? ColorDrawable)?.color == Color.parseColor("#FFE599")
 
-            // entryMap を上書きコピーして currentRowClass があればそれを優先して渡す
-            // ただし、手動でクラスを指定した場合に該当EntryNoがエントリーリストに無ければ保存を拒否
+            // 5) クラス変更の可否チェック（既存）
             if (currentRowClass != null && !entryMap.containsKey(entryNumber)) {
                 Toast.makeText(this, "⚠️ エントリーが未登録のためクラスを変更できません", Toast.LENGTH_LONG).show()
                 return@let
             }
+
+            // 6) 保存用の entryMap（既存）
             val effectiveEntryMap = entryMap.toMutableMap()
             if (currentRowClass != null) {
                 val existing = entryMap[entryNumber]
@@ -924,6 +929,7 @@ class CameraActivity : AppCompatActivity() {
                 effectiveEntryMap[entryNumber] = Pair(name, currentRowClass!!)
             }
 
+            // 7) CSV 追記（仕様ガード遵守：列順・マージは CsvExporter 側に委譲）
             CsvExporter.appendResultToCsv(
                 context = this,
                 currentSession = currentSession,
@@ -939,13 +945,19 @@ class CameraActivity : AppCompatActivity() {
                 entryMap = effectiveEntryMap
             )
 
+            // 8) UI 戻し＋保存ボタン隠し（既存）
             guideOverlay.setDetected("red")
             confirmButton.visibility = View.GONE
-            // 保存完了後は画面上の手動クラス指定をクリアしておく
+
+            // 9) ここで認識UIを丸ごと初期化（新規追加）
+            clearRecognitionUi()
+
+            // 10) 手動クラス指定はクリア（既存）
             currentRowClass = null
             updateTournamentInfoText()
-         }
-     }
+        }
+    }
+
 
 
 
@@ -1776,4 +1788,35 @@ class CameraActivity : AppCompatActivity() {
             .setNegativeButton("キャンセル", null)
             .show()
     }
+    // 認識結果を安全に初期化（UIのみ）
+    private fun clearRecognitionUi() {
+        // スコアラベルを空に＆背景リセット
+        scoreLabelViews.forEach { label ->
+            label.text = ""
+            label.setBackgroundResource(R.drawable.bg_score_blank)
+        }
+
+        // 合計表示クリア
+        findViewById<TextView>(R.id.scorePointText).text = "G:　-"
+        findViewById<TextView>(R.id.scoreCleanText).text = "C:　-"
+
+        // エントリー番号表示クリア
+        resultText.text = "No: -"
+        resultText.setBackgroundColor(Color.TRANSPARENT)
+
+        // プレビュー画像クリア
+        scorePreview.setImageDrawable(null)
+        scorePreview.visibility = View.GONE
+
+        // 状態フラグと一時画像をクリア
+        hasScoreResult = false
+        lastOcrHadEntry = false
+        pendingSaveBitmap = null
+
+        // 枠は待機（赤）に戻す & 保存ボタンは隠す
+        guideOverlay.setDetected("red")
+        confirmButton.visibility = View.GONE
+    }
+
+
 }
