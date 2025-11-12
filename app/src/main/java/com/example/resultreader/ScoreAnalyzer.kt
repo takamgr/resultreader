@@ -62,11 +62,15 @@ object ScoreAnalyzer {
             }
 
             val finalScore: Int? = when {
-                punchCount == 0 -> null // ← パンチ無しはスコアなし！
-                punchCount == 1 -> detectedScores.firstOrNull()
-                punchCount == 4 -> (0..4).toSet().minus(detectedScores.toSet()).firstOrNull() ?: 0
-                punchCount == 5 -> 99
-                else -> 99
+                punchCount == 0 -> null                             // パンチ無しはスコアなし
+                punchCount == 1 -> detectedScores.firstOrNull()     // 通常：その行を採用
+                punchCount == 4 -> {                                // 誤パンチ補正：欠けている1行が真のスコア
+                    val expected = setOf(0, 1, 2, 3, 5)             // 4というスコアは存在しない
+                    val missing = expected - detectedScores.toSet()
+                    missing.firstOrNull() ?: 5                      // 一意に決まらなければ安全側で5
+                }
+                punchCount == 5 -> 99                               // 全部打ちは無効（99）
+                else -> 99                                          // 2〜3個など不定は無効扱い
             }
 
             sectionScores.add(finalScore)
