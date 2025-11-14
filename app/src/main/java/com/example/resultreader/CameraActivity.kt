@@ -753,6 +753,8 @@ class CameraActivity : AppCompatActivity() {
 
             if (hasInvalid) {
                 Toast.makeText(this, "❌ スコアに空欄やエラー（99など）が含まれているため保存できません", Toast.LENGTH_SHORT).show()
+                // 保存不可時はチェック音を鳴らす
+                playJudgeSound(false)
                 return@setOnClickListener
             }
 
@@ -1188,6 +1190,8 @@ class CameraActivity : AppCompatActivity() {
                         "⚠️ 判定一致せず：手動確認して修正してください",
                         Toast.LENGTH_LONG
                     ).show()
+                    // エラー時はチェック音を鳴らす
+                    playJudgeSound(false)
                     confirmButton.visibility = View.VISIBLE
                 }
 
@@ -1782,6 +1786,8 @@ class CameraActivity : AppCompatActivity() {
                 } else {
                     guideOverlay.setDetected("red")
                     Toast.makeText(this, "⚠️ 判定一致せず：手動確認してください", Toast.LENGTH_LONG).show()
+                    // エラー時はチェック音を鳴らす
+                    playJudgeSound(false)
                     confirmButton.visibility = View.VISIBLE
                 }
 
