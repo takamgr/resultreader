@@ -29,7 +29,8 @@ object CsvExporter {
         isManual: Boolean,
         amCount: Int,
         pattern: TournamentPattern,
-        entryMap: Map<Int, Pair<String, String>>
+        entryMap: Map<Int, Pair<String, String>>,
+        status: String? = null   // ★ DNF/DNS 対応追加
     ) {
         val dateFormat = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
         val today = dateFormat.format(Date())
@@ -40,7 +41,13 @@ object CsvExporter {
 
         val totalCount = amCount * 2
         val currentTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-        val label = if (isManual) "手入力" else "OCR"
+
+        // ★ 入力列のラベルを DNF / DNS 対応に変更
+        val label = when (status) {
+            "DNF" -> if (isManual) "手入力-DNF" else "OCR-DNF"
+            "DNS" -> "DNS"
+            else -> if (isManual) "手入力" else "OCR"
+        }
 
         if (!entryMap.containsKey(entryNo)) {
             Toast.makeText(context, "⚠️ EntryNo=$entryNo は未登録です。保存されませんでした。", Toast.LENGTH_LONG).show()
@@ -62,10 +69,12 @@ object CsvExporter {
         baseRow[1] = name
         baseRow[2] = clazz
 
-        val filledScores = (allScores + List(maxOf(0, totalCount - allScores.size)) { null }).take(totalCount)
+        val filledScores =
+            (allScores + List(maxOf(0, totalCount - allScores.size)) { null }).take(totalCount)
         val amScores = filledScores.take(amCount)
         val pmScores = filledScores.drop(amCount)
 
+        // インデックス取得（絶対領域・列順固定）
         val agIndex = header.indexOf("AmG")
         val acIndex = header.indexOf("AmC")
         val amRankIndex = header.indexOf("AmRank")
@@ -86,6 +95,7 @@ object CsvExporter {
         val existingIndex = rows.indexOfFirst { it.firstOrNull() == entryNo.toString() }
         val row = if (existingIndex >= 0) rows[existingIndex] else baseRow
 
+        // AM/PM スコア埋め込み
         if (currentSession == "AM") {
             amSecIndices.forEachIndexed { i, idx ->
                 row[idx] = filledScores.getOrNull(i)?.toString() ?: ""
@@ -100,13 +110,20 @@ object CsvExporter {
             row[pcIndex] = pmClean.toString()
         }
 
-        val totalG = listOfNotNull(row.getOrNull(agIndex)?.toIntOrNull(), row.getOrNull(pgIndex)?.toIntOrNull()).sum()
-        val totalC = listOfNotNull(row.getOrNull(acIndex)?.toIntOrNull(), row.getOrNull(pcIndex)?.toIntOrNull()).sum()
+        val totalG = listOfNotNull(
+            row.getOrNull(agIndex)?.toIntOrNull(),
+            row.getOrNull(pgIndex)?.toIntOrNull()
+        ).sum()
+
+        val totalC = listOfNotNull(
+            row.getOrNull(acIndex)?.toIntOrNull(),
+            row.getOrNull(pcIndex)?.toIntOrNull()
+        ).sum()
 
         row[totalGIndex] = totalG.toString()
         row[totalCIndex] = totalC.toString()
         row[timeIndex] = currentTime
-        row[inputTypeIndex] = label
+        row[inputTypeIndex] = label     // ★ ここに DNF / DNS ラベルが入る
         row[sessionIndex] = currentSession
 
         if (existingIndex >= 0) {
@@ -119,13 +136,16 @@ object CsvExporter {
             }
         }
 
+        // ランク計算（絶対領域・不変）
         fun assignClassRank(index: Int, scoreGetter: (List<String>) -> Int?) {
-            val classGroups = rows.groupBy { it.getOrNull(2) ?: "?" }  // ← Class列は固定で2番目
+            val classGroups = rows.groupBy { it.getOrNull(2) ?: "?" }
             for ((clazz, group) in classGroups) {
                 if (clazz.isBlank() || clazz == "?") continue
                 group
                     .mapNotNull { row -> scoreGetter(row)?.let { score -> row to score } }
-                    .sortedWith(compareBy({ it.second }, { -((it.first.getOrNull(acIndex)?.toIntOrNull()) ?: 0) }))
+                    .sortedWith(
+                        compareBy({ it.second }, { -((it.first.getOrNull(acIndex)?.toIntOrNull()) ?: 0) })
+                    )
                     .forEachIndexed { i, (r, _) -> r[index] = (i + 1).toString() }
             }
         }
@@ -134,6 +154,7 @@ object CsvExporter {
         assignClassRank(pmRankIndex) { it.getOrNull(pgIndex)?.toIntOrNull() }
         assignClassRank(totalRankIndex) { it.getOrNull(totalGIndex)?.toIntOrNull() }
 
+        // クラス並び替え（絶対領域）
         val classOrderMap = when (
             context.getSharedPreferences("ResultReaderPrefs", Context.MODE_PRIVATE)
                 .getString("tournamentType", "beginner")
@@ -142,7 +163,7 @@ object CsvExporter {
             else -> listOf("オープン", "ビギナー")
         }.withIndex().associate { it.value to it.index }
 
-        val classIndex = 2  // Class列は2番目に固定
+        val classIndex = 2
 
         val finalSorted = rows.sortedWith(
             compareBy<List<String>> {
