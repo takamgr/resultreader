@@ -9,8 +9,8 @@ import android.util.Log
 import android.widget.Toast
 import java.io.BufferedWriter
 import java.io.File
-import java.io.OutputStreamWriter
 import java.io.FileOutputStream
+import java.io.OutputStreamWriter
 import java.nio.charset.Charset
 import java.text.SimpleDateFormat
 import java.util.*
@@ -30,8 +30,9 @@ object CsvExporter {
         amCount: Int,
         pattern: TournamentPattern,
         entryMap: Map<Int, Pair<String, String>>,
-        status: String? = null   // ★ DNF/DNS 対応追加
+        status: String? = null   // ★ DNF/DNS 対応
     ) {
+        // 1) ファイル準備（不変領域）
         val dateFormat = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
         val today = dateFormat.format(Date())
         val fileName = "result_${pattern.patternCode}_$today.csv"
@@ -42,39 +43,51 @@ object CsvExporter {
         val totalCount = amCount * 2
         val currentTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
 
-        // ★ 入力列のラベルを DNF / DNS 対応に変更
+        // 2) 入力列ラベル（DNF/DNS 対応）
         val label = when (status) {
             "DNF" -> if (isManual) "手入力-DNF" else "OCR-DNF"
             "DNS" -> "DNS"
             else -> if (isManual) "手入力" else "OCR"
         }
 
+        // 3) EntryNo がエントリリストに存在しない場合は保存中止
         if (!entryMap.containsKey(entryNo)) {
-            Toast.makeText(context, "⚠️ EntryNo=$entryNo は未登録です。保存されませんでした。", Toast.LENGTH_LONG).show()
+            Toast.makeText(
+                context,
+                "⚠️ EntryNo=$entryNo は未登録です。保存されませんでした。",
+                Toast.LENGTH_LONG
+            ).show()
             Log.w("CSV_EXPORT", "⛔ 未登録のEntryNo=$entryNo → 保存中止")
             return
         }
 
+        // 4) 既存行読み込み（ヘッダ除外）
         val rows = if (csvFile.exists()) {
-            csvFile.readLines(Charsets.UTF_8).drop(1).map { it.split(",").toMutableList() }.toMutableList()
-        } else mutableListOf()
+            csvFile.readLines(Charsets.UTF_8)
+                .drop(1)
+                .map { it.split(",").toMutableList() }
+                .toMutableList()
+        } else {
+            mutableListOf()
+        }
 
+        // 5) ヘッダ生成（不変領域）
         val header = generateCsvHeader(pattern).toMutableList()
         header.add(1, "Name")
         header.add(2, "Class")
 
+        // 6) ベース行作成（Name / Class）
         val baseRow = MutableList(header.size) { "" }
         baseRow[0] = entryNo.toString()
-        val (name, clazz) = entryMap[entryNo] ?: "" to ""
+        val (name, clazz) = entryMap[entryNo] ?: ("" to "")
         baseRow[1] = name
         baseRow[2] = clazz
 
+        // 7) スコア配列整形
         val filledScores =
             (allScores + List(maxOf(0, totalCount - allScores.size)) { null }).take(totalCount)
-        val amScores = filledScores.take(amCount)
-        val pmScores = filledScores.drop(amCount)
 
-        // インデックス取得（絶対領域・列順固定）
+        // 8) 列インデックス取得（絶対領域・列名は固定）
         val agIndex = header.indexOf("AmG")
         val acIndex = header.indexOf("AmC")
         val amRankIndex = header.indexOf("AmRank")
@@ -88,44 +101,81 @@ object CsvExporter {
         val inputTypeIndex = header.indexOf("入力")
         val sessionIndex = header.indexOf("セッション")
 
-        val secIndices = header.withIndex().filter { it.value.matches(Regex("Sec\\d{2}")) }.map { it.index }
+        val secIndices = header.withIndex()
+            .filter { it.value.matches(Regex("Sec\\d{2}")) }
+            .map { it.index }
         val amSecIndices = secIndices.take(amCount)
         val pmSecIndices = secIndices.drop(amCount)
 
+        // 9) 既存行の有無を確認
         val existingIndex = rows.indexOfFirst { it.firstOrNull() == entryNo.toString() }
         val row = if (existingIndex >= 0) rows[existingIndex] else baseRow
 
-        // AM/PM スコア埋め込み
+        val isDnfOrDns = (status == "DNF" || status == "DNS")
+
+        // 10) Sec列と AmG/AmC / PmG/PmC を埋める
         if (currentSession == "AM") {
+            // Sec01〜を埋める（DNF/DNS でもログとして残す）
             amSecIndices.forEachIndexed { i, idx ->
                 row[idx] = filledScores.getOrNull(i)?.toString() ?: ""
             }
-            row[agIndex] = amScore.toString()
-            row[acIndex] = amClean.toString()
+
+            if (isDnfOrDns) {
+                // DNF/DNS → このエントリーはランキング対象外にするため G/C 全消し
+                if (agIndex >= 0) row[agIndex] = ""
+                if (acIndex >= 0) row[acIndex] = ""
+                if (pgIndex >= 0) row[pgIndex] = ""
+                if (pcIndex >= 0) row[pcIndex] = ""
+            } else {
+                // 通常 → AM側だけ更新（PM側は既存値を維持）
+                if (agIndex >= 0) row[agIndex] = amScore.toString()
+                if (acIndex >= 0) row[acIndex] = amClean.toString()
+            }
         } else {
+            // currentSession == "PM"
             pmSecIndices.forEachIndexed { i, idx ->
                 row[idx] = filledScores.getOrNull(i + amCount)?.toString() ?: ""
             }
-            row[pgIndex] = pmScore.toString()
-            row[pcIndex] = pmClean.toString()
+
+            if (isDnfOrDns) {
+                // DNF/DNS → このエントリーはランキング対象外にするため G/C 全消し
+                if (agIndex >= 0) row[agIndex] = ""
+                if (acIndex >= 0) row[acIndex] = ""
+                if (pgIndex >= 0) row[pgIndex] = ""
+                if (pcIndex >= 0) row[pcIndex] = ""
+            } else {
+                // 通常 → PM側だけ更新（AM側は既存値を維持）
+                if (pgIndex >= 0) row[pgIndex] = pmScore.toString()
+                if (pcIndex >= 0) row[pcIndex] = pmClean.toString()
+            }
         }
 
-        val totalG = listOfNotNull(
-            row.getOrNull(agIndex)?.toIntOrNull(),
-            row.getOrNull(pgIndex)?.toIntOrNull()
-        ).sum()
+        // 11) TotalG / TotalC 計算
+        if (isDnfOrDns) {
+            // DNF/DNS はトータルも空欄にしてランキングから外す
+            if (totalGIndex >= 0) row[totalGIndex] = ""
+            if (totalCIndex >= 0) row[totalCIndex] = ""
+        } else {
+            val totalG = listOfNotNull(
+                row.getOrNull(agIndex)?.toIntOrNull(),
+                row.getOrNull(pgIndex)?.toIntOrNull()
+            ).sum()
 
-        val totalC = listOfNotNull(
-            row.getOrNull(acIndex)?.toIntOrNull(),
-            row.getOrNull(pcIndex)?.toIntOrNull()
-        ).sum()
+            val totalC = listOfNotNull(
+                row.getOrNull(acIndex)?.toIntOrNull(),
+                row.getOrNull(pcIndex)?.toIntOrNull()
+            ).sum()
 
-        row[totalGIndex] = totalG.toString()
-        row[totalCIndex] = totalC.toString()
-        row[timeIndex] = currentTime
-        row[inputTypeIndex] = label     // ★ ここに DNF / DNS ラベルが入る
-        row[sessionIndex] = currentSession
+            if (totalGIndex >= 0) row[totalGIndex] = totalG.toString()
+            if (totalCIndex >= 0) row[totalCIndex] = totalC.toString()
+        }
 
+        // 12) 共通情報の更新
+        if (timeIndex >= 0) row[timeIndex] = currentTime
+        if (inputTypeIndex >= 0) row[inputTypeIndex] = label
+        if (sessionIndex >= 0) row[sessionIndex] = currentSession
+
+        // 13) rows に反映
         if (existingIndex >= 0) {
             rows[existingIndex] = row
         } else {
@@ -136,7 +186,7 @@ object CsvExporter {
             }
         }
 
-        // ランク計算（絶対領域・不変）
+        // 14) クラス内ランク計算（絶対領域・手を加えない）
         fun assignClassRank(index: Int, scoreGetter: (List<String>) -> Int?) {
             val classGroups = rows.groupBy { it.getOrNull(2) ?: "?" }
             for ((clazz, group) in classGroups) {
@@ -154,7 +204,17 @@ object CsvExporter {
         assignClassRank(pmRankIndex) { it.getOrNull(pgIndex)?.toIntOrNull() }
         assignClassRank(totalRankIndex) { it.getOrNull(totalGIndex)?.toIntOrNull() }
 
-        // クラス並び替え（絶対領域）
+        // 15) DNF/DNS 行は Rank を空欄に戻す（並び替えロジック自体は変更しない）
+        if (isDnfOrDns) {
+            val targetRow = rows.find { it.firstOrNull() == entryNo.toString() }
+            targetRow?.let { r ->
+                if (amRankIndex >= 0 && amRankIndex < r.size) r[amRankIndex] = ""
+                if (pmRankIndex >= 0 && pmRankIndex < r.size) r[pmRankIndex] = ""
+                if (totalRankIndex >= 0 && totalRankIndex < r.size) r[totalRankIndex] = ""
+            }
+        }
+
+        // 16) クラス並び替え（絶対領域・不変）
         val classOrderMap = when (
             context.getSharedPreferences("ResultReaderPrefs", Context.MODE_PRIVATE)
                 .getString("tournamentType", "beginner")
@@ -175,13 +235,26 @@ object CsvExporter {
             }
         )
 
-        BufferedWriter(OutputStreamWriter(FileOutputStream(csvFile, false), Charsets.UTF_8)).use { writer ->
+        // 17) 書き出し
+        BufferedWriter(
+            OutputStreamWriter(
+                FileOutputStream(csvFile, false),
+                Charsets.UTF_8
+            )
+        ).use { writer ->
             writer.write("\uFEFF" + header.joinToString(","))
             writer.newLine()
-            finalSorted.forEach { writer.write(it.joinToString(",")); writer.newLine() }
+            finalSorted.forEach {
+                writer.write(it.joinToString(","))
+                writer.newLine()
+            }
         }
 
-        Toast.makeText(context, "✅ $fileName に保存＋クラス内順位＋並び替えOK", Toast.LENGTH_SHORT).show()
+        Toast.makeText(
+            context,
+            "✅ $fileName に保存＋クラス内順位＋並び替えOK",
+            Toast.LENGTH_SHORT
+        ).show()
         Log.d("CSV_EXPORT", "保存＋ClassRank再計算完了：$fileName")
     }
 
