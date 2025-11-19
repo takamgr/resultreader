@@ -87,6 +87,12 @@ object CsvExporter {
         val filledScores =
             (allScores + List(maxOf(0, totalCount - allScores.size)) { null }).take(totalCount)
 
+        // ★ 7.5) CSV 出力用に 99 → null（＝空欄）へ正規化
+        //      ・ScoreAnalyzer / UI の中では 99 を使うが、
+        //      ・ここから先（CSV保存以降）は 99 を見せたくないので空欄扱いにする
+        val normalizedScores: List<Int?> =
+            filledScores.map { v -> if (v == 99) null else v }
+
         // 8) 列インデックス取得（絶対領域・列名は固定）
         val agIndex = header.indexOf("AmG")
         val acIndex = header.indexOf("AmC")
@@ -117,7 +123,8 @@ object CsvExporter {
         if (currentSession == "AM") {
             // Sec01〜を埋める（DNF/DNS でもログとして残す）
             amSecIndices.forEachIndexed { i, idx ->
-                row[idx] = filledScores.getOrNull(i)?.toString() ?: ""
+                // ★ normalizedScores を使用：99 はここで空欄になる
+                row[idx] = normalizedScores.getOrNull(i)?.toString() ?: ""
             }
 
             if (isDnfOrDns) {
@@ -134,7 +141,8 @@ object CsvExporter {
         } else {
             // currentSession == "PM"
             pmSecIndices.forEachIndexed { i, idx ->
-                row[idx] = filledScores.getOrNull(i + amCount)?.toString() ?: ""
+                // ★ normalizedScores を使用：99 はここで空欄になる
+                row[idx] = normalizedScores.getOrNull(i + amCount)?.toString() ?: ""
             }
 
             if (isDnfOrDns) {
