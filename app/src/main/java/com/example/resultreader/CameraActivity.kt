@@ -559,14 +559,14 @@ class CameraActivity : AppCompatActivity() {
         val idBtnExportHtml = resources.getIdentifier("btnExportHtml", "id", packageName)
         if (idBtnExportHtml != 0) {
             findViewById<ImageButton?>(idBtnExportHtml)?.setOnClickListener {
-                PrintableExporter.exportPrintablePdfStyledSplitByClass(this, selectedPattern, rowsPerPage = 15)
+                PrintableExporter.exportPrintablePdfStyledSplitByClass(this, selectedPattern, rowsPerPage = 20)
             }
         }
 
         val idBtnExportPdf = resources.getIdentifier("btnExportPdf", "id", packageName)
         if (idBtnExportPdf != 0) {
             findViewById<ImageButton?>(idBtnExportPdf)?.setOnClickListener {
-                PrintableExporter.exportPrintablePdfStyledSplitByClass(this, selectedPattern, rowsPerPage = 15)
+                PrintableExporter.exportPrintablePdfStyledSplitByClass(this, selectedPattern, rowsPerPage = 20)
             }
         }
 
@@ -864,7 +864,7 @@ class CameraActivity : AppCompatActivity() {
                     }
                     2 -> {
                         // Canvas unified PDF (per-class single page behavior folded into unified renderer)
-                        PrintableExporter.exportPrintablePdfStyledSplitByClass(this, selectedPattern, rowsPerPage = 15)
+                        PrintableExporter.exportPrintablePdfStyledSplitByClass(this, selectedPattern, rowsPerPage = 20)
                         true
                     }
 
@@ -872,7 +872,7 @@ class CameraActivity : AppCompatActivity() {
 
                     5 -> {
                         // Canvas PDF with per-row thin lines enabled for visual verification
-                        PrintableExporter.exportPrintablePdfStyledSplitByClass(this, selectedPattern, rowsPerPage = 15)
+                        PrintableExporter.exportPrintablePdfStyledSplitByClass(this, selectedPattern, rowsPerPage = 20)
                         true
                     }
 
@@ -882,7 +882,7 @@ class CameraActivity : AppCompatActivity() {
                     }
                     4 -> {
                         // legacy: map to unified Canvas exporter
-                        PrintableExporter.exportPrintablePdfStyledSplitByClass(this, selectedPattern, rowsPerPage = 15)
+                        PrintableExporter.exportPrintablePdfStyledSplitByClass(this, selectedPattern, rowsPerPage = 20)
                         true
                     }
                      else -> false

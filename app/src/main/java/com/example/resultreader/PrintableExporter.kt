@@ -82,7 +82,7 @@ object PrintableExporter {
     @Deprecated("Use exportPrintablePdfStyledFromCsv instead", level = DeprecationLevel.HIDDEN)
     private fun exportPrintablePdfToDownloads(context: Context, pattern: TournamentPattern) {
         // Delegate to Canvas renderer
-        exportPrintablePdfStyledFromCsv(context, pattern, rowsPerPage = 15)
+        exportPrintablePdfStyledFromCsv(context, pattern, rowsPerPage = 20)
     }
 
     // ───────── クラス別 PDF ─────────
@@ -93,7 +93,7 @@ object PrintableExporter {
     private fun exportPrintablePdfByClass(
         context: Context,
         pattern: TournamentPattern,
-        rowsPerPage: Int = 15
+        rowsPerPage: Int = 20
     ) {
         // Delegate to unified Canvas renderer
         exportPrintablePdfStyledFromCsv(context, pattern, rowsPerPage)
@@ -466,7 +466,7 @@ object PrintableExporter {
     fun exportPrintablePdfStyledFromCsv(
         context: Context,
         pattern: TournamentPattern,
-        rowsPerPage: Int = 15,
+        rowsPerPage: Int = 20,
         drawRowLines: Boolean = false // default: off to preserve previous appearance
     ) {
         // debug: entry & option
@@ -713,7 +713,7 @@ object PrintableExporter {
     fun exportPrintablePdfStyledSplitByClass(
         context: Context,
         pattern: TournamentPattern,
-        rowsPerPage: Int = 15
+        rowsPerPage: Int = 20
     ) {
         val src = File(
             context.getExternalFilesDir("ResultReader"),
