@@ -11,7 +11,6 @@ import java.io.BufferedWriter
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStreamWriter
-import java.nio.charset.Charset
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -212,15 +211,18 @@ object CsvExporter {
         assignClassRank(pmRankIndex) { it.getOrNull(pgIndex)?.toIntOrNull() }
         assignClassRank(totalRankIndex) { it.getOrNull(totalGIndex)?.toIntOrNull() }
 
-        // 15) DNF/DNS 行は Rank を空欄に戻す（並び替えロジック自体は変更しない）
+        // 15) DNF/DNS 行は「トータルランク」だけラベル表示（計算には使わない）
         if (isDnfOrDns) {
             val targetRow = rows.find { it.firstOrNull() == entryNo.toString() }
             targetRow?.let { r ->
-                if (amRankIndex >= 0 && amRankIndex < r.size) r[amRankIndex] = ""
-                if (pmRankIndex >= 0 && pmRankIndex < r.size) r[pmRankIndex] = ""
-                if (totalRankIndex >= 0 && totalRankIndex < r.size) r[totalRankIndex] = ""
+                val rankLabel = status ?: ""
+                // ★ AmRank / PmRank はそのまま、TotalRank だけ DNF / DNS 表示
+                if (totalRankIndex >= 0 && totalRankIndex < r.size) {
+                    r[totalRankIndex] = rankLabel
+                }
             }
         }
+
 
         // 16) クラス並び替え（絶対領域・不変）
         val classOrderMap = when (
