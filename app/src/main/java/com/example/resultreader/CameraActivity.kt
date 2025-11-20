@@ -863,6 +863,7 @@ class CameraActivity : AppCompatActivity() {
                         true
                     }
                     2 -> {
+
                         // Canvas unified PDF (per-class single page behavior folded into unified renderer)
                         PrintableExporter.exportPrintablePdfStyledSplitByClass(this, selectedPattern, rowsPerPage = 20)
                         true
