@@ -68,27 +68,70 @@
             android:text="8セク×3ラップ（4×3）" />
     </RadioGroup>
 
-    <!-- ▼ セッション切替 -->
+    <!-- ▼ セッション切替 ＋ チェックボタン -->
     <LinearLayout
-        android:orientation="horizontal"
+        android:orientation="vertical"
         android:gravity="center"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="24dp">
 
-        <Button
-            android:id="@+id/buttonAM"
-            android:layout_width="0dp"
-            android:layout_weight="1"
-            android:layout_height="wrap_content"
-            android:text="午前" />
+        <!-- 1段目：AM / PM -->
+        <LinearLayout
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
 
-        <Button
-            android:id="@+id/buttonPM"
-            android:layout_width="0dp"
-            android:layout_weight="1"
+            <Button
+                android:id="@+id/buttonAM"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="午前" />
+
+            <Button
+                android:id="@+id/buttonPM"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="午後"
+                android:layout_marginStart="8dp" />
+        </LinearLayout>
+
+        <!-- 2段目：チェック3ボタン -->
+        <LinearLayout
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="午後"
-            android:layout_marginStart="8dp" />
+            android:layout_marginTop="12dp">
+
+            <Button
+                android:id="@+id/buttonCheckAm"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="午前確定" />
+
+            <Button
+                android:id="@+id/buttonCheckMissing"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="提出"
+                android:layout_marginStart="8dp" />
+
+            <Button
+                android:id="@+id/buttonCheckFinal"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="最終結果"
+                android:layout_marginStart="8dp" />
+        </LinearLayout>
+
     </LinearLayout>
+
+
 </LinearLayout>

@@ -51,6 +51,8 @@ import android.text.InputFilter
 import android.text.InputType
 import android.widget.EditText
 import android.widget.PopupMenu
+import android.view.ViewGroup
+
 
 
 
@@ -1483,16 +1485,19 @@ class CameraActivity : AppCompatActivity() {
 
 
     private fun showInitialTournamentSettingDialog(onComplete: () -> Unit) {
+
         val dialogView = layoutInflater.inflate(R.layout.dialog_tournament_setting, null)
 
+        // ▼ 既存UI
         val radioGroupPattern = dialogView.findViewById<RadioGroup>(R.id.radioGroupPattern)
         val radio4x2 = dialogView.findViewById<RadioButton>(R.id.radioPattern4x2)
         val radio4x3 = dialogView.findViewById<RadioButton>(R.id.radioPattern4x3)
         val radio5x2 = dialogView.findViewById<RadioButton>(R.id.radioPattern5x2)
+
         val amButton = dialogView.findViewById<Button>(R.id.buttonAM)
         val pmButton = dialogView.findViewById<Button>(R.id.buttonPM)
 
-        // ⬇ 追加：大会種別（ビギナー／選手権）
+        // ▼ 大会種別
         val beginnerRadioButton = dialogView.findViewById<RadioButton>(R.id.radioBeginner)
         val championshipRadioButton = dialogView.findViewById<RadioButton>(R.id.radioChampionship)
 
@@ -1502,7 +1507,7 @@ class CameraActivity : AppCompatActivity() {
             else -> beginnerRadioButton.isChecked = true
         }
 
-        // 既存値をUIに反映
+        // ▼ パターン
         when (selectedPattern) {
             TournamentPattern.PATTERN_4x2 -> radio4x2.isChecked = true
             TournamentPattern.PATTERN_4x3 -> radio4x3.isChecked = true
@@ -1513,27 +1518,40 @@ class CameraActivity : AppCompatActivity() {
 
         amButton.setOnClickListener {
             currentSession = "AM"
-            val prefs = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
             prefs.edit().putString("lastSession", "AM").apply()
             updateSessionButtons(amButton, pmButton)
         }
 
         pmButton.setOnClickListener {
             currentSession = "PM"
-            val prefs = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
             prefs.edit().putString("lastSession", "PM").apply()
             updateSessionButtons(amButton, pmButton)
         }
 
-        // --- 追加: 大会名と開催日をダイアログに動的追加（Plan B: XML変更なし）
+        // ▼ チェック系3ボタン
+        dialogView.findViewById<Button>(R.id.buttonCheckAm).setOnClickListener {
+            checkAmStatus()
+        }
+
+        dialogView.findViewById<Button>(R.id.buttonCheckMissing).setOnClickListener {
+            checkMissingEntries(currentSession)
+        }
+
+        dialogView.findViewById<Button>(R.id.buttonCheckFinal).setOnClickListener {
+            checkFinalStatus()
+        }
+
+        // ▼ 大会名・開催日 入力
         val prefsForDialog = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
         val initialName = prefsForDialog.getString("tournamentName", "") ?: ""
         val initialDate = prefsForDialog.getString("eventDate", "") ?: ""
 
-        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        val lp = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
         lp.topMargin = (8 * resources.displayMetrics.density).toInt()
 
-        // 大会名入力
         val editTournamentName = EditText(this).apply {
             hint = "大会名（例：第3回 オラガバレーTRIALS）"
             setText(initialName)
@@ -1542,7 +1560,6 @@ class CameraActivity : AppCompatActivity() {
             id = View.generateViewId()
         }
 
-        // 開催日入力（非直接編集：DatePicker を開く）
         val editEventDate = EditText(this).apply {
             hint = "開催日 (YYYY-MM-DD)"
             setText(initialDate)
@@ -1551,36 +1568,49 @@ class CameraActivity : AppCompatActivity() {
             layoutParams = lp
             id = View.generateViewId()
             setOnClickListener {
-                // 現在の値をベースにカレンダー表示
                 val now = Calendar.getInstance()
                 val parts = text.toString().trim().takeIf { it.isNotEmpty() }?.let { s ->
                     try {
                         if (s.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {
                             val p = s.split("-")
-                            Triple(p[0].toInt(), p[1].toInt()-1, p[2].toInt())
+                            Triple(p[0].toInt(), p[1].toInt() - 1, p[2].toInt())
                         } else if (s.matches(Regex("\\d{8}"))) {
-                            Triple(s.substring(0,4).toInt(), s.substring(4,6).toInt()-1, s.substring(6,8).toInt())
+                            Triple(
+                                s.substring(0, 4).toInt(),
+                                s.substring(4, 6).toInt() - 1,
+                                s.substring(6, 8).toInt()
+                            )
                         } else null
-                    } catch (_: Exception) { null }
+                    } catch (_: Exception) {
+                        null
+                    }
                 }
+
                 val y = parts?.first ?: now.get(Calendar.YEAR)
                 val m = parts?.second ?: now.get(Calendar.MONTH)
                 val d = parts?.third ?: now.get(Calendar.DAY_OF_MONTH)
-                android.app.DatePickerDialog(this@CameraActivity, { _, yy, mm, dd ->
-                    val ys = String.format(Locale.getDefault(), "%04d-%02d-%02d", yy, mm+1, dd)
-                    this@apply.setText(ys)
-                 }, y, m, d).show()
+
+                android.app.DatePickerDialog(
+                    this@CameraActivity,
+                    { _, yy, mm, dd ->
+                        val ys = String.format(Locale.getDefault(), "%04d-%02d-%02d", yy, mm + 1, dd)
+                        this@apply.setText(ys)
+                    },
+                    y, m, d
+                ).show()
             }
         }
 
-        // ルートに追加（既存レイアウトの末尾に縦追加）
         (dialogView as? LinearLayout)?.addView(editTournamentName)
         (dialogView as? LinearLayout)?.addView(editEventDate)
-        AlertDialog.Builder(this)
-            .setTitle("本日の大会設定を確認してください")
+
+        // ▼ ダイアログ構築
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("本日の大会設定")
             .setView(dialogView)
             .setCancelable(false)
             .setPositiveButton("OK") { _, _ ->
+
                 selectedPattern = when (radioGroupPattern.checkedRadioButtonId) {
                     R.id.radioPattern4x2 -> TournamentPattern.PATTERN_4x2
                     R.id.radioPattern4x3 -> TournamentPattern.PATTERN_4x3
@@ -1588,33 +1618,48 @@ class CameraActivity : AppCompatActivity() {
                     else -> TournamentPattern.PATTERN_4x2
                 }
 
-                val tournamentType = if (championshipRadioButton.isChecked) "championship" else "beginner"
+                val tournamentType =
+                    if (championshipRadioButton.isChecked) "championship" else "beginner"
 
-                val prefs = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
+                val prefs2 = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
                 val today = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
-                prefs.edit().apply {
+
+                prefs2.edit().apply {
                     putString("lastSetDate", today)
                     putString("lastPattern", selectedPattern.name)
                     putString("lastSession", currentSession)
                     putString("tournamentType", tournamentType)
-                    // 保存: 大会名 / 開催日（ダイアログの動的フィールドがあれば反映）
+
                     try {
                         val nameText = dialogView.findViewById<EditText>(editTournamentName.id)?.text?.toString()?.trim()
                         val dateText = dialogView.findViewById<EditText>(editEventDate.id)?.text?.toString()?.trim()
                         if (!nameText.isNullOrBlank()) putString("tournamentName", nameText)
                         if (!dateText.isNullOrBlank()) putString("eventDate", dateText)
-                    } catch (_: Exception) { /* ignore */ }
+                    } catch (_: Exception) {}
+
                     apply()
                 }
 
                 tournamentInfoText.text = "${selectedPattern.patternCode} / $currentSession"
+                Toast.makeText(
+                    this,
+                    "設定: ${selectedPattern.name} [$currentSession]",
+                    Toast.LENGTH_SHORT
+                ).show()
 
-                Toast.makeText(this, "設定: ${selectedPattern.name} [$currentSession]", Toast.LENGTH_SHORT).show()
                 updateTournamentInfoText()
-
                 onComplete()
             }
-            .show()
+            .create()
+
+        dialog.show()
+
+        // ▼ ダイアログを画面ほぼいっぱいまで拡大する（97%）
+        val width = (resources.displayMetrics.widthPixels * 0.97).toInt()
+        dialog.window?.setLayout(
+            width,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
     }
 
     private fun loadEntryMap(): Map<Int, Pair<String, String>> {
@@ -1929,6 +1974,231 @@ class CameraActivity : AppCompatActivity() {
             .setNegativeButton("キャンセル", null)
             .show()
     }
+
+    // ------------------------------------------------------------
+// AMチェック（AM同点＋AM未集計）
+// ------------------------------------------------------------
+    private fun checkAmStatus() {
+        try {
+            val pattern = selectedPattern ?: return
+            val today = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
+            val fileName = "result_${pattern.patternCode}_$today.csv"
+            val csvFile = File(getExternalFilesDir("ResultReader"), fileName)
+
+            if (!csvFile.exists()) {
+                Toast.makeText(this, "CSVがまだありません", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            // ★ 1行目のBOMを除去してヘッダーを作る
+            val allLines = csvFile.readLines(Charsets.UTF_8)
+            if (allLines.isEmpty()) {
+                Toast.makeText(this, "CSVが空です", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            val header = allLines.first()
+                .split(",")
+                .map { it.replace("\uFEFF", "").trim() }   // ← ここ大事
+            val rows = allLines.drop(1).map { it.split(",") }
+
+            val entryNoIdx = header.indexOf("EntryNo")
+            val inputIdx   = header.indexOf("入力")
+            val amGIdx     = header.indexOf("AmG")
+            val amCIdx     = header.indexOf("AmC")
+
+            if (entryNoIdx == -1 || inputIdx == -1 || amGIdx == -1 || amCIdx == -1) {
+                Toast.makeText(this, "ヘッダー解析エラー(AM)", Toast.LENGTH_LONG).show()
+                return
+            }
+
+            // ■ AM完全同点グループ検出（DNSは除外）
+            val amGroups = rows
+                .filter { it.getOrNull(inputIdx) != "DNS" }
+                .groupBy { row -> "${row.getOrNull(amGIdx)}_${row.getOrNull(amCIdx)}" }
+                .filter { (_, group) ->
+                    group.size > 1 && group.firstOrNull()?.getOrNull(amGIdx)?.isNullOrBlank() == false
+                }
+
+            if (amGroups.isNotEmpty()) {
+                Toast.makeText(this, "AMに完全同点があります。掲示前に確認してください", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(this, "AM同点はありません", Toast.LENGTH_SHORT).show()
+            }
+
+            // ■ 未読み取り（AM）チェック（EntryList 基準）
+            val missing = entryMap.keys.filter { entryNo ->
+                val row = rows.find { it.getOrNull(entryNoIdx)?.toIntOrNull() == entryNo }
+                row == null ||
+                        (row.getOrNull(amGIdx).isNullOrBlank()
+                                && row.getOrNull(amCIdx).isNullOrBlank()
+                                && row.getOrNull(inputIdx) != "DNS")
+            }
+
+            if (missing.isNotEmpty()) {
+                AlertDialog.Builder(this)
+                    .setTitle("AM未集計エントリー")
+                    .setMessage(missing.joinToString("\n") { "No:$it ${entryMap[it]?.first ?: ""}" })
+                    .setPositiveButton("OK", null)
+                    .show()
+            } else {
+                Toast.makeText(this, "AM未集計はありません", Toast.LENGTH_SHORT).show()
+            }
+
+        } catch (e: Exception) {
+            Toast.makeText(this, "AMチェックでエラー: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+
+
+    // ------------------------------------------------------------
+// 未集計チェック（AM / PM 共通）
+// ------------------------------------------------------------
+    private fun checkMissingEntries(session: String) {
+        try {
+            val pattern = selectedPattern ?: return
+            val today = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
+            val fileName = "result_${pattern.patternCode}_$today.csv"
+            val csvFile = File(getExternalFilesDir("ResultReader"), fileName)
+
+            if (!csvFile.exists()) {
+                Toast.makeText(this, "CSVがまだありません", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            val allLines = csvFile.readLines(Charsets.UTF_8)
+            if (allLines.isEmpty()) return
+
+            val header = allLines.first()
+                .split(",")
+                .map { it.replace("\uFEFF", "").trim() }
+            val rows = allLines.drop(1).map { it.split(",") }
+
+            val entryNoIdx = header.indexOf("EntryNo")
+            val inputIdx   = header.indexOf("入力")
+            val amGIdx     = header.indexOf("AmG")
+            val amCIdx     = header.indexOf("AmC")
+            val pmGIdx     = header.indexOf("PmG")
+            val pmCIdx     = header.indexOf("PmC")
+
+            if (entryNoIdx == -1 || inputIdx == -1 ||
+                amGIdx == -1 || amCIdx == -1 || pmGIdx == -1 || pmCIdx == -1
+            ) {
+                Toast.makeText(this, "ヘッダー解析エラー(未集計)", Toast.LENGTH_LONG).show()
+                return
+            }
+
+            val missing = entryMap.keys.filter { entryNo ->
+                val row = rows.find { it.getOrNull(entryNoIdx)?.toIntOrNull() == entryNo }
+
+                if (session == "AM") {
+                    row == null ||
+                            (row.getOrNull(amGIdx).isNullOrBlank()
+                                    && row.getOrNull(amCIdx).isNullOrBlank()
+                                    && row.getOrNull(inputIdx) != "DNS")
+                } else {
+                    row == null ||
+                            (row.getOrNull(pmGIdx).isNullOrBlank()
+                                    && row.getOrNull(pmCIdx).isNullOrBlank()
+                                    && row.getOrNull(inputIdx) != "DNS")
+                }
+            }
+
+            if (missing.isNotEmpty()) {
+                AlertDialog.Builder(this)
+                    .setTitle("${session}未集計エントリー")
+                    .setMessage(missing.joinToString("\n") { "No:$it ${entryMap[it]?.first ?: ""}" })
+                    .setPositiveButton("OK", null)
+                    .show()
+            } else {
+                Toast.makeText(this, "${session}未集計はありません", Toast.LENGTH_SHORT).show()
+            }
+
+        } catch (e: Exception) {
+            Toast.makeText(this, "未集計チェックでエラー: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // ------------------------------------------------------------
+// 最終チェック（Total同点＋PM未集計）
+// ------------------------------------------------------------
+    private fun checkFinalStatus() {
+        try {
+            val pattern = selectedPattern ?: return
+            val today = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
+            val fileName = "result_${pattern.patternCode}_$today.csv"
+            val csvFile = File(getExternalFilesDir("ResultReader"), fileName)
+
+            if (!csvFile.exists()) {
+                Toast.makeText(this, "CSVがまだありません", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            val allLines = csvFile.readLines(Charsets.UTF_8)
+            if (allLines.isEmpty()) return
+
+            val header = allLines.first()
+                .split(",")
+                .map { it.replace("\uFEFF", "").trim() }
+            val rows = allLines.drop(1).map { it.split(",") }
+
+            val entryNoIdx  = header.indexOf("EntryNo")
+            val inputIdx    = header.indexOf("入力")
+            val totalGIdx   = header.indexOf("TotalG")
+            val totalCIdx   = header.indexOf("TotalC")
+            val pmGIdx      = header.indexOf("PmG")
+            val pmCIdx      = header.indexOf("PmC")
+
+            if (entryNoIdx == -1 || inputIdx == -1 ||
+                totalGIdx == -1 || totalCIdx == -1 ||
+                pmGIdx == -1 || pmCIdx == -1
+            ) {
+                Toast.makeText(this, "ヘッダー解析エラー(最終)", Toast.LENGTH_LONG).show()
+                return
+            }
+
+            // ■ Total完全同点（DNS除外）
+            val totalGroups = rows
+                .filter { it.getOrNull(inputIdx) != "DNS" }
+                .groupBy { row -> "${row.getOrNull(totalGIdx)}_${row.getOrNull(totalCIdx)}" }
+                .filter { (_, group) ->
+                    group.size > 1 && group.firstOrNull()?.getOrNull(totalGIdx)?.isNullOrBlank() == false
+                }
+
+            val tieMsg =
+                if (totalGroups.isNotEmpty()) "最終同点があります。掲示前に確認してください"
+                else "最終同点はありません"
+
+            // ■ PM未集計
+            val missing = entryMap.keys.filter { entryNo ->
+                val row = rows.find { it.getOrNull(entryNoIdx)?.toIntOrNull() == entryNo }
+                row == null ||
+                        (row.getOrNull(pmGIdx).isNullOrBlank()
+                                && row.getOrNull(pmCIdx).isNullOrBlank()
+                                && row.getOrNull(inputIdx) != "DNS")
+            }
+
+            val missingMsg =
+                if (missing.isNotEmpty()) {
+                    "PM未集計エントリー:\n" +
+                            missing.joinToString("\n") { "No:$it ${entryMap[it]?.first ?: ""}" }
+                } else {
+                    "PM未集計はありません"
+                }
+
+            AlertDialog.Builder(this)
+                .setTitle("最終チェック")
+                .setMessage("$tieMsg\n\n$missingMsg")
+                .setPositiveButton("OK", null)
+                .show()
+
+        } catch (e: Exception) {
+            Toast.makeText(this, "最終チェックでエラー: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+
     // 認識結果を安全に初期化（UIのみ）
     private fun clearRecognitionUi() {
         // スコアラベルを空に＆背景リセット
