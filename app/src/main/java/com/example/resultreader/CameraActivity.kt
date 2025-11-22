@@ -464,12 +464,17 @@ class CameraActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-
         // まずレイアウトを先に読み込む！
         setContentView(R.layout.activity_camera)
 
         guideToggleButton = findViewById(R.id.guideToggleButton)  // ← これ忘れずに！
         entryMap = CsvUtils.loadEntryMapFromCsv(this)
+
+        // 🔹撮影準備ボタン長押し → 保存ボタン長押し（DNF/DNSダイアログ）と同じ動作
+        guideToggleButton.setOnLongClickListener {
+            confirmButton.performLongClick()
+            true
+        }
 
         guideToggleButton.setOnClickListener {
             if (!isCameraReady) {
@@ -499,6 +504,7 @@ class CameraActivity : AppCompatActivity() {
                 Toast.makeText(this, "📴 カメラ手動OFF", Toast.LENGTH_SHORT).show()
             }
         }
+
 
         // 🔽 onCreate() 内の setContentView() のあと、Viewの初期化のすぐ後あたりに追記
         scoreLabelViews = listOf(
@@ -537,6 +543,11 @@ class CameraActivity : AppCompatActivity() {
         guideOverlay = findViewById(R.id.guideOverlay)
         scorePreview = findViewById(R.id.scorePreview)
         previewView = findViewById(R.id.previewView)
+
+        prepareButton.setOnLongClickListener {
+            confirmButton.performLongClick()
+            true
+        }
 
         // 追加: 掲示用出力ボタンのクリックリスナー（R生成前の環境でも安全に動作するよう動的取得）
         val exportS1ButtonId = resources.getIdentifier("exportS1Button", "id", packageName)
