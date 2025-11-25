@@ -130,10 +130,8 @@ object CsvExporter {
                 // DNF/DNS → このエントリーはランキング対象外にするため G/C 全消し
                 if (agIndex >= 0) row[agIndex] = ""
                 if (acIndex >= 0) row[acIndex] = ""
-                if (pgIndex >= 0) row[pgIndex] = ""
-                if (pcIndex >= 0) row[pcIndex] = ""
             } else {
-                // 通常 → AM側だけ更新（PM側は既存値を維持）
+                // 通常時：AmG/AmC を更新
                 if (agIndex >= 0) row[agIndex] = amScore.toString()
                 if (acIndex >= 0) row[acIndex] = amClean.toString()
             }
@@ -151,18 +149,14 @@ object CsvExporter {
                 if (pgIndex >= 0) row[pgIndex] = ""
                 if (pcIndex >= 0) row[pcIndex] = ""
             } else {
-                // 通常 → PM側だけ更新（AM側は既存値を維持）
+                // 通常時：PmG/PmC を更新
                 if (pgIndex >= 0) row[pgIndex] = pmScore.toString()
                 if (pcIndex >= 0) row[pcIndex] = pmClean.toString()
             }
         }
 
-        // 11) TotalG / TotalC 計算
-        if (isDnfOrDns) {
-            // DNF/DNS はトータルも空欄にしてランキングから外す
-            if (totalGIndex >= 0) row[totalGIndex] = ""
-            if (totalCIndex >= 0) row[totalCIndex] = ""
-        } else {
+        // 11) TotalG / TotalC の再計算（DNF/DNS は除外）
+        if (!isDnfOrDns) {
             val totalG = listOfNotNull(
                 row.getOrNull(agIndex)?.toIntOrNull(),
                 row.getOrNull(pgIndex)?.toIntOrNull()
@@ -193,23 +187,89 @@ object CsvExporter {
             }
         }
 
-        // 14) クラス内ランク計算（絶対領域・手を加えない）
-        fun assignClassRank(index: Int, scoreGetter: (List<String>) -> Int?) {
-            val classGroups = rows.groupBy { it.getOrNull(2) ?: "?" }
-            for ((clazz, group) in classGroups) {
-                if (clazz.isBlank() || clazz == "?") continue
-                group
-                    .mapNotNull { row -> scoreGetter(row)?.let { score -> row to score } }
-                    .sortedWith(
-                        compareBy({ it.second }, { -((it.first.getOrNull(acIndex)?.toIntOrNull()) ?: 0) })
-                    )
-                    .forEachIndexed { i, (r, _) -> r[index] = (i + 1).toString() }
+        // --- ここから v1.7 公式ルール用ヘルパー ---
+
+        // 指定された Sec 列について「target 点」が何回あるかを数える
+        fun countScoreInSections(
+            r: List<String>,
+            indices: List<Int>,
+            target: Int
+        ): Int {
+            return indices.count { idx ->
+                r.getOrNull(idx)?.toIntOrNull() == target
             }
         }
 
-        assignClassRank(amRankIndex) { it.getOrNull(agIndex)?.toIntOrNull() }
-        assignClassRank(pmRankIndex) { it.getOrNull(pgIndex)?.toIntOrNull() }
-        assignClassRank(totalRankIndex) { it.getOrNull(totalGIndex)?.toIntOrNull() }
+        // ランキング計算に使うまとめデータ
+        data class RankedRow(
+            val row: MutableList<String>,
+            val g: Int,
+            val clean: Int,
+            val oneCount: Int,
+            val twoCount: Int,
+            val threeCount: Int
+        )
+
+        // 14) クラス内ランク計算（Ver.1.7 正式ルール）
+        fun assignClassRank(index: Int) {
+            val classGroups = rows.groupBy { it.getOrNull(2) ?: "?" }  // Class 列
+            for ((clazz, group) in classGroups) {
+                if (clazz.isBlank() || clazz == "?") continue
+
+                val ranked = group.mapNotNull { r ->
+                    when (index) {
+                        amRankIndex -> {
+                            val g = r.getOrNull(agIndex)?.toIntOrNull() ?: return@mapNotNull null
+                            val c = r.getOrNull(acIndex)?.toIntOrNull() ?: 0
+                            val one = countScoreInSections(r, amSecIndices, 1)
+                            val two = countScoreInSections(r, amSecIndices, 2)
+                            val three = countScoreInSections(r, amSecIndices, 3)
+                            RankedRow(r, g, c, one, two, three)
+                        }
+                        pmRankIndex -> {
+                            val g = r.getOrNull(pgIndex)?.toIntOrNull() ?: return@mapNotNull null
+                            val c = r.getOrNull(pcIndex)?.toIntOrNull() ?: 0
+                            val one = countScoreInSections(r, pmSecIndices, 1)
+                            val two = countScoreInSections(r, pmSecIndices, 2)
+                            val three = countScoreInSections(r, pmSecIndices, 3)
+                            RankedRow(r, g, c, one, two, three)
+                        }
+                        totalRankIndex -> {
+                            val g = r.getOrNull(totalGIndex)?.toIntOrNull() ?: return@mapNotNull null
+                            val c = r.getOrNull(totalCIndex)?.toIntOrNull() ?: 0
+                            val one = countScoreInSections(r, secIndices, 1)
+                            val two = countScoreInSections(r, secIndices, 2)
+                            val three = countScoreInSections(r, secIndices, 3)
+                            RankedRow(r, g, c, one, two, three)
+                        }
+                        else -> return@mapNotNull null
+                    }
+                }.sortedWith(
+                    // Ver.1.7 正式ルール:
+                    // 1) G少ない順
+                    // 2) C多い順
+                    // 3) 1点セク多い順
+                    // 4) 2点セク多い順
+                    // 5) 3点セク多い順
+                    compareBy<RankedRow> { it.g }
+                        .thenByDescending { it.clean }
+                        .thenByDescending { it.oneCount }
+                        .thenByDescending { it.twoCount }
+                        .thenByDescending { it.threeCount }
+                )
+
+                ranked.forEachIndexed { i, rr ->
+                    if (index >= 0 && index < rr.row.size) {
+                        rr.row[index] = (i + 1).toString()
+                    }
+                }
+            }
+        }
+
+        // ★ v1.7 では assignClassRank は公式ルールで Am / Pm / Total 全てに適用
+        assignClassRank(amRankIndex)
+        assignClassRank(pmRankIndex)
+        assignClassRank(totalRankIndex)
 
         // 15) DNF/DNS 行は「トータルランク」だけラベル表示（計算には使わない）
         if (isDnfOrDns) {
@@ -223,8 +283,7 @@ object CsvExporter {
             }
         }
 
-
-        // 16) クラス並び替え（絶対領域・不変）
+        // 16) クラス並び替え（Ver.1.7 正式ルールで Total を使用）
         val classOrderMap = when (
             context.getSharedPreferences("ResultReaderPrefs", Context.MODE_PRIVATE)
                 .getString("tournamentType", "beginner")
@@ -237,11 +296,23 @@ object CsvExporter {
 
         val finalSorted = rows.sortedWith(
             compareBy<List<String>> {
+                // クラス順（ビギナー/選手権）を最優先
                 classOrderMap[it.getOrNull(classIndex) ?: ""] ?: Int.MAX_VALUE
             }.thenBy {
+                // TotalG 少ない順
                 it.getOrNull(totalGIndex)?.toIntOrNull() ?: Int.MAX_VALUE
             }.thenByDescending {
+                // TotalC 多い順
                 it.getOrNull(totalCIndex)?.toIntOrNull() ?: Int.MIN_VALUE
+            }.thenByDescending {
+                // 1点セク多い順（全Secを対象）
+                countScoreInSections(it, secIndices, 1)
+            }.thenByDescending {
+                // 2点セク多い順
+                countScoreInSections(it, secIndices, 2)
+            }.thenByDescending {
+                // 3点セク多い順
+                countScoreInSections(it, secIndices, 3)
             }
         )
 
@@ -252,24 +323,27 @@ object CsvExporter {
                 Charsets.UTF_8
             )
         ).use { writer ->
-            writer.write("\uFEFF" + header.joinToString(","))
+            writer.write("\uFEFF")
+            writer.write(header.joinToString(","))
             writer.newLine()
-            finalSorted.forEach {
-                writer.write(it.joinToString(","))
+            finalSorted.forEach { r ->
+                writer.write(r.joinToString(","))
                 writer.newLine()
             }
         }
 
         Toast.makeText(
             context,
-            "✅ $fileName に保存＋クラス内順位＋並び替えOK",
+            "✅ ${csvFile.name} に保存しました",
             Toast.LENGTH_SHORT
         ).show()
-        Log.d("CSV_EXPORT", "保存＋ClassRank再計算完了：$fileName")
     }
 
+    // 18) ヘッダ生成（Sec列数はパターン依存）
     fun generateCsvHeader(pattern: TournamentPattern): List<String> {
-        val headers = mutableListOf("EntryNo")
+        val headers = mutableListOf<String>()
+        headers.add("EntryNo")
+
         val totalCount = when (pattern) {
             TournamentPattern.PATTERN_4x2 -> 16
             TournamentPattern.PATTERN_4x3 -> 24
@@ -287,3 +361,5 @@ object CsvExporter {
         return headers
     }
 }
+
+
