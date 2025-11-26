@@ -381,6 +381,12 @@ object PrintableExporter {
         val grid: Int = android.graphics.Color.rgb(180, 180, 180),
         val text: Int = android.graphics.Color.BLACK
     )
+    // AM暫定PDF と 最終PDF を切り替えるモード
+    enum class PdfSessionMode {
+        AM_PROVISIONAL,   // 午前中暫定：A順のみ同率 1,1,3 表示
+        FINAL             // 最終：CSVの順位そのまま（同率なし）
+    }
+
 
     // ── 右寄せ対象の判定（数値系は右寄せ）
     private fun isNumericCol(label: String): Boolean {
@@ -728,10 +734,13 @@ object PrintableExporter {
 
     // ── 追加：クラスごとに別PDFで出力（ロール紙向け）
     // ── クラス別PDF（1クラス=1ファイル、Lap帯つき・全パターン対応）
+    // ── 追加：クラスごとに別PDFで出力（ロール紙向け）
+    // ── クラス別PDF（1クラス=1ファイル、Lap帯つき・全パターン対応）
     fun exportPrintablePdfStyledSplitByClass(
         context: Context,
         pattern: TournamentPattern,
-        rowsPerPage: Int = 20
+        rowsPerPage: Int = 20,
+        sessionMode: PdfSessionMode = PdfSessionMode.FINAL
     ) {
         val src = File(
             context.getExternalFilesDir("ResultReader"),
@@ -751,7 +760,6 @@ object PrintableExporter {
             TournamentPattern.PATTERN_4x2 -> PatternInfo(4, 2)
             TournamentPattern.PATTERN_4x3 -> PatternInfo(4, 3)
             TournamentPattern.PATTERN_5x2 -> PatternInfo(5, 2)
-            else -> PatternInfo(4, 2)
         }
         val sectionsPerLap = pInfo.sectionsPerLap
         val lapsPerSession = pInfo.lapsPerSession
@@ -835,6 +843,105 @@ object PrintableExporter {
             addAll(grouped.keys.filter { it.isNotBlank() && it !in baseOrder }.sorted())
         }
 
+        // ---------- AM暫定PDF用：A順だけ v1.7 ルールで同率(1,1,3...)を振り直す ----------
+        data class AmRankRow(
+            val entryNo: String,
+            val clazz: String,
+            val g: Int,
+            val c: Int,
+            val one: Int,
+            val two: Int,
+            val three: Int
+        )
+
+        fun buildAmProvisionalRankMap(): Map<String, Int> {
+            val result = mutableMapOf<String, Int>()
+
+            val entryNoIdx = headerNorm.indexOf("EntryNo")
+            val amGIdx = headerNorm.indexOf("AmG")
+            val amCIdx = headerNorm.indexOf("AmC")
+            val inputIdx = headerNorm.indexOf("入力")
+
+            if (entryNoIdx < 0 || amGIdx < 0 || amCIdx < 0) {
+                return emptyMap()
+            }
+
+            // AM側だけの Sec 列インデックス
+            val amSecIndices = headerNorm.mapIndexedNotNull { idx, h ->
+                val m = secRegex.matchEntire(h) ?: return@mapIndexedNotNull null
+                val secNo = m.groupValues[1].toInt()
+                if (secNo in 1..perSession) idx else null
+            }
+
+            fun countScore(row: List<String>, indices: List<Int>, target: Int): Int =
+                indices.count { idx -> row.getOrNull(idx)?.toIntOrNull() == target }
+
+            val groupedByClass = rowsAll.groupBy { it.getOrNull(classIdx)?.trim().orEmpty() }
+
+            groupedByClass.forEach { (clazz, list) ->
+                if (clazz.isBlank()) return@forEach
+
+                val scored = list.mapNotNull { r ->
+                    val entryNo = r.getOrNull(entryNoIdx)
+                        ?.trim()?.trim('"')
+                        ?.takeUnless { it.isNullOrEmpty() } ?: return@mapNotNull null
+
+                    // DNF / DNS 行や AmG 空欄は暫定順位から除外
+                    val g = r.getOrNull(amGIdx)?.toIntOrNull() ?: return@mapNotNull null
+
+                    val inputLabel = if (inputIdx >= 0) r.getOrNull(inputIdx).orEmpty() else ""
+                    if (inputLabel.contains("DNF") || inputLabel.contains("DNS")) {
+                        return@mapNotNull null
+                    }
+
+                    val c = r.getOrNull(amCIdx)?.toIntOrNull() ?: 0
+                    val one = countScore(r, amSecIndices, 1)
+                    val two = countScore(r, amSecIndices, 2)
+                    val three = countScore(r, amSecIndices, 3)
+
+                    AmRankRow(entryNo, clazz, g, c, one, two, three)
+                }.sortedWith(
+                    // v1.7 正規採点ルール
+                    compareBy<AmRankRow> { it.g }
+                        .thenByDescending { it.c }
+                        .thenByDescending { it.one }
+                        .thenByDescending { it.two }
+                        .thenByDescending { it.three }
+                )
+
+                // 同率を 1,1,3,4,5... の形で採番する
+                var pos = 1
+                var i = 0
+                while (i < scored.size) {
+                    val base = scored[i]
+                    val same = mutableListOf<AmRankRow>()
+                    same.add(base)
+                    var j = i + 1
+                    while (j < scored.size) {
+                        val t = scored[j]
+                        if (t.g == base.g &&
+                            t.c == base.c &&
+                            t.one == base.one &&
+                            t.two == base.two &&
+                            t.three == base.three
+                        ) {
+                            same.add(t)
+                            j++
+                        } else break
+                    }
+                    same.forEach { r -> result[r.entryNo] = pos }
+                    pos += same.size
+                    i = j
+                }
+            }
+
+            return result
+        }
+
+        val amProvisionalRanks: Map<String, Int> =
+            if (sessionMode == PdfSessionMode.AM_PROVISIONAL) buildAmProvisionalRankMap()
+            else emptyMap()
+
         // ---------- 描画用 Paint ----------
         val pageW = 842
         val pageH = 595
@@ -883,9 +990,20 @@ object PrintableExporter {
             canvas.drawText(text, x, baselineY, paint)
         }
 
-        // ---------- クラスごとにPDF出力 ----------
+        // ---------- セクション番号 → 列index のマップ ----------
+        val secToColIndex = mutableMapOf<Int, Int>()
+        for (i in headers.indices) {
+            val raw = headerNorm[keep[i]]
+            val m = secRegex.matchEntire(raw)
+            if (m != null) {
+                val secNo = m.groupValues[1].toInt()
+                secToColIndex[secNo] = i
+            }
+        }
+
         var anySaved = false
 
+        // ---------- クラスごとにPDF出力 ----------
         for (clazz in classes) {
             val list = grouped[clazz].orEmpty()
             if (list.isEmpty()) continue
@@ -949,18 +1067,7 @@ object PrintableExporter {
                     }
                 }
 
-                // secNo -> 列index
-                val secToColIndex = mutableMapOf<Int, Int>()
-                for (i in headers.indices) {
-                    val raw = headerNorm[keep[i]]
-                    val m = secRegex.matchEntire(raw)
-                    if (m != null) {
-                        val secNo = m.groupValues[1].toInt()
-                        secToColIndex[secNo] = i
-                    }
-                }
-
-                // ヘッダ行より上に置く「ラップ帯」の行（全パターン）
+                // ラップ帯（AM Lap1.. / PM Lap1.. / 結果帯）の上側に表示
                 if ((1..totalSec).all { secToColIndex.containsKey(it) }) {
                     pBold.textSize = 10f
                     val lapBaseY = y
@@ -1059,6 +1166,9 @@ object PrintableExporter {
                 y += 25f
                 var lastRowBottom = headerBottom
 
+                // EntryNo の列位置（A順上書き時に使う）
+                val entryNoIdxInKeep = keep.indexOfFirst { headerNorm[it] == "EntryNo" }
+
                 chunk.forEachIndexed { rIndex, row ->
                     val rowTop = y - 12f
                     val rowBottom = y + 12f
@@ -1078,13 +1188,27 @@ object PrintableExporter {
                         }
                     }
 
-                    // セル文字（全列中央揃え）
+                    // セル文字（全列中央揃え・A順は AM暫定モードなら 1,1,3… に差し替え）
                     val baseLineY = y
                     headers.indices.forEach { i ->
-                        val v = row.getOrNull(keep[i])?.trim('"')?.trim().orEmpty()
+                        val rawValue = row.getOrNull(keep[i])?.trim('"')?.trim().orEmpty()
+                        val headerLabel = headers[i]
+
+                        var text = rawValue
+
+                        if (sessionMode == PdfSessionMode.AM_PROVISIONAL && headerLabel == "A順") {
+                            val entryNoForRow: String? =
+                                if (entryNoIdxInKeep >= 0)
+                                    row.getOrNull(keep[entryNoIdxInKeep])?.trim('"')?.trim()
+                                else null
+                            val rank = entryNoForRow?.let { amProvisionalRanks[it] }
+                            if (rank != null) {
+                                text = rank.toString()
+                            }
+                        }
+
                         val left = colStartX[i]
                         val right = left + colWidths[i]
-                        val text = v
                         val w = pText.measureText(text)
                         val x = left + (right - left - w) / 2f
                         c.drawText(text, x, baseLineY, pText)
@@ -1189,5 +1313,5 @@ object PrintableExporter {
             if (anySaved) "✅ クラス別PDF（1クラス=1ファイル）を保存しました" else "❌ PDF出力なし",
             Toast.LENGTH_SHORT
         ).show()
-    }
-}
+
+    }}

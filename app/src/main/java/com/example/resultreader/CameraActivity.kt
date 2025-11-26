@@ -568,20 +568,46 @@ class CameraActivity : AppCompatActivity() {
             }
         }
 
-        // HTML and older PDF buttons are disabled/hidden. Hook unified Canvas exporter if legacy IDs used.
+        // HTML and older PDF buttons are disabled/hidden.
+        // → もしレイアウトに残っていれば、AMは暫定PDF、PM/Totalは最終PDFとして動かす。
         val idBtnExportHtml = resources.getIdentifier("btnExportHtml", "id", packageName)
         if (idBtnExportHtml != 0) {
             findViewById<ImageButton?>(idBtnExportHtml)?.setOnClickListener {
-                PrintableExporter.exportPrintablePdfStyledSplitByClass(this, selectedPattern, rowsPerPage = 20)
+                // AMなら暫定（A順=1,1,3…）、それ以外は最終（CSV通り）
+                val mode =
+                    if (currentSession == "AM")
+                        PrintableExporter.PdfSessionMode.AM_PROVISIONAL
+                    else
+                        PrintableExporter.PdfSessionMode.FINAL
+
+                PrintableExporter.exportPrintablePdfStyledSplitByClass(
+                    context = this,
+                    pattern = selectedPattern,
+                    rowsPerPage = 20,
+                    sessionMode = mode
+                )
             }
         }
 
         val idBtnExportPdf = resources.getIdentifier("btnExportPdf", "id", packageName)
         if (idBtnExportPdf != 0) {
             findViewById<ImageButton?>(idBtnExportPdf)?.setOnClickListener {
-                PrintableExporter.exportPrintablePdfStyledSplitByClass(this, selectedPattern, rowsPerPage = 20)
+                // AMなら暫定PDF、PM/Totalは最終PDF
+                val mode =
+                    if (currentSession == "AM")
+                        PrintableExporter.PdfSessionMode.AM_PROVISIONAL
+                    else
+                        PrintableExporter.PdfSessionMode.FINAL
+
+                PrintableExporter.exportPrintablePdfStyledSplitByClass(
+                    context = this,
+                    pattern = selectedPattern,
+                    rowsPerPage = 20,
+                    sessionMode = mode
+                )
             }
         }
+
 
         // その後に SharedPreferences → 設定ダイアログ呼び出し！
         val prefs = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
@@ -878,7 +904,19 @@ class CameraActivity : AppCompatActivity() {
                     2 -> {
 
                         // Canvas unified PDF (per-class single page behavior folded into unified renderer)
-                        PrintableExporter.exportPrintablePdfStyledSplitByClass(this, selectedPattern, rowsPerPage = 20)
+                        val mode =
+                            if (currentSession == "AM")
+                                PrintableExporter.PdfSessionMode.AM_PROVISIONAL
+                            else
+                                PrintableExporter.PdfSessionMode.FINAL
+
+                        PrintableExporter.exportPrintablePdfStyledSplitByClass(
+                            context = this,
+                            pattern = selectedPattern,
+                            rowsPerPage = 20,
+                            sessionMode = mode
+                        )
+
                         true
                     }
 
@@ -886,7 +924,19 @@ class CameraActivity : AppCompatActivity() {
 
                     5 -> {
                         // Canvas PDF with per-row thin lines enabled for visual verification
-                        PrintableExporter.exportPrintablePdfStyledSplitByClass(this, selectedPattern, rowsPerPage = 20)
+                        val mode =
+                            if (currentSession == "AM")
+                                PrintableExporter.PdfSessionMode.AM_PROVISIONAL
+                            else
+                                PrintableExporter.PdfSessionMode.FINAL
+
+                        PrintableExporter.exportPrintablePdfStyledSplitByClass(
+                            context = this,
+                            pattern = selectedPattern,
+                            rowsPerPage = 20,
+                            sessionMode = mode
+                        )
+
                         true
                     }
 
@@ -896,7 +946,19 @@ class CameraActivity : AppCompatActivity() {
                     }
                     4 -> {
                         // legacy: map to unified Canvas exporter
-                        PrintableExporter.exportPrintablePdfStyledSplitByClass(this, selectedPattern, rowsPerPage = 20)
+                        val mode =
+                            if (currentSession == "AM")
+                                PrintableExporter.PdfSessionMode.AM_PROVISIONAL
+                            else
+                                PrintableExporter.PdfSessionMode.FINAL
+
+                        PrintableExporter.exportPrintablePdfStyledSplitByClass(
+                            context = this,
+                            pattern = selectedPattern,
+                            rowsPerPage = 20,
+                            sessionMode = mode
+                        )
+
                         true
                     }
                      else -> false
@@ -1989,6 +2051,9 @@ class CameraActivity : AppCompatActivity() {
     // ------------------------------------------------------------
 // AMチェック（AM同点＋AM未集計）
 // ------------------------------------------------------------
+    // ------------------------------------------------------------
+// AMチェック（AM完全同点＋AM未集計）  ※完全同点判定は v1.7 ルール準拠
+// ------------------------------------------------------------
     private fun checkAmStatus() {
         try {
             val pattern = selectedPattern ?: return
@@ -2010,7 +2075,7 @@ class CameraActivity : AppCompatActivity() {
 
             val header = allLines.first()
                 .split(",")
-                .map { it.replace("\uFEFF", "").trim() }   // ← ここ大事
+                .map { it.replace("\uFEFF", "").trim() }
             val rows = allLines.drop(1).map { it.split(",") }
 
             val entryNoIdx = header.indexOf("EntryNo")
@@ -2023,18 +2088,20 @@ class CameraActivity : AppCompatActivity() {
                 return
             }
 
-            // ■ AM完全同点グループ検出（DNSは除外）
-            val amGroups = rows
-                .filter { it.getOrNull(inputIdx) != "DNS" }
-                .groupBy { row -> "${row.getOrNull(amGIdx)}_${row.getOrNull(amCIdx)}" }
-                .filter { (_, group) ->
-                    group.size > 1 && group.firstOrNull()?.getOrNull(amGIdx)?.isNullOrBlank() == false
-                }
+            // ■ AM完全同点チェック（DNS / DNF 除外, v1.7 正式ルール）
+            val hasPerfectTie = hasPerfectTieV17(
+                header = header,
+                rows = rows,
+                inputIdx = inputIdx,
+                gIdx = amGIdx,
+                cIdx = amCIdx,
+                session = "AM"
+            )
 
-            if (amGroups.isNotEmpty()) {
+            if (hasPerfectTie) {
                 Toast.makeText(this, "AMに完全同点があります。掲示前に確認してください", Toast.LENGTH_LONG).show()
             } else {
-                Toast.makeText(this, "AM同点はありません", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "AM完全同点はありません", Toast.LENGTH_SHORT).show()
             }
 
             // ■ 未読み取り（AM）チェック（EntryList 基準）
@@ -2060,6 +2127,7 @@ class CameraActivity : AppCompatActivity() {
             Toast.makeText(this, "AMチェックでエラー: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
+
 
 
 
@@ -2134,6 +2202,9 @@ class CameraActivity : AppCompatActivity() {
     // ------------------------------------------------------------
 // 最終チェック（Total同点＋PM未集計）
 // ------------------------------------------------------------
+    // ------------------------------------------------------------
+// 最終チェック（Total完全同点＋PM未集計）  ※完全同点判定は v1.7 ルール準拠
+// ------------------------------------------------------------
     private fun checkFinalStatus() {
         try {
             val pattern = selectedPattern ?: return
@@ -2169,17 +2240,21 @@ class CameraActivity : AppCompatActivity() {
                 return
             }
 
-            // ■ Total完全同点（DNS除外）
-            val totalGroups = rows
-                .filter { it.getOrNull(inputIdx) != "DNS" }
-                .groupBy { row -> "${row.getOrNull(totalGIdx)}_${row.getOrNull(totalCIdx)}" }
-                .filter { (_, group) ->
-                    group.size > 1 && group.firstOrNull()?.getOrNull(totalGIdx)?.isNullOrBlank() == false
-                }
+            // ■ Total完全同点（DNS / DNF 除外, v1.7 正式ルール）
+            val hasTotalPerfectTie = hasPerfectTieV17(
+                header = header,
+                rows = rows,
+                inputIdx = inputIdx,
+                gIdx = totalGIdx,
+                cIdx = totalCIdx,
+                session = "TOTAL"
+            )
 
             val tieMsg =
-                if (totalGroups.isNotEmpty()) "最終同点があります。掲示前に確認してください"
-                else "最終同点はありません"
+                if (hasTotalPerfectTie)
+                    "最終完全同点があります。順位を確定させてください。"
+                else
+                    "最終完全同点はありません。"
 
             // ■ PM未集計
             val missing = entryMap.keys.filter { entryNo ->
@@ -2195,7 +2270,7 @@ class CameraActivity : AppCompatActivity() {
                     "PM未集計エントリー:\n" +
                             missing.joinToString("\n") { "No:$it ${entryMap[it]?.first ?: ""}" }
                 } else {
-                    "PM未集計はありません"
+                    "PM未集計はありません。"
                 }
 
             AlertDialog.Builder(this)
@@ -2208,6 +2283,77 @@ class CameraActivity : AppCompatActivity() {
             Toast.makeText(this, "最終チェックでエラー: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
+
+    // ------------------------------------------------------------
+// v1.7 正式ルール準拠の「完全同点」検出ヘルパー
+//   ・同じクラス内
+//   ・G / C / 1点数 / 2点数 / 3点数 がすべて同じ
+//   ・DNS / DNF は除外
+//   session = "AM" → 午前セクションだけ
+//   session = "TOTAL" → 全セクション
+// ------------------------------------------------------------
+    private fun hasPerfectTieV17(
+        header: List<String>,
+        rows: List<List<String>>,
+        inputIdx: Int,
+        gIdx: Int,
+        cIdx: Int,
+        session: String   // "AM" or "TOTAL"
+    ): Boolean {
+        if (inputIdx < 0 || gIdx < 0 || cIdx < 0) return false
+
+        // Class 列
+        val classIdx = header.indexOf("Class")
+
+        // Sec列のインデックス一覧
+        val secIndices = header.withIndex()
+            .filter { it.value.matches(Regex("Sec\\d{2}")) }
+            .map { it.index }
+
+        if (secIndices.isEmpty()) return false
+
+        // AM用のSec範囲＝前半、TOTAL用＝全Sec
+        val amSecIndices = secIndices.take(secIndices.size / 2)
+        val targetSecIndices = if (session == "AM") amSecIndices else secIndices
+
+        fun countScore(row: List<String>, indices: List<Int>, target: Int): Int {
+            return indices.count { idx ->
+                row.getOrNull(idx)?.toIntOrNull() == target
+            }
+        }
+
+        data class Key(
+            val clazz: String,
+            val g: Int,
+            val c: Int,
+            val one: Int,
+            val two: Int,
+            val three: Int
+        )
+
+        val counts = mutableMapOf<Key, Int>()
+
+        for (row in rows) {
+            val input = row.getOrNull(inputIdx) ?: ""
+            // DNS と DNF系（手入力-DNF / OCR-DNF）を除外
+            if (input == "DNS" || input.contains("DNF")) continue
+
+            val g = row.getOrNull(gIdx)?.toIntOrNull() ?: continue
+            val c = row.getOrNull(cIdx)?.toIntOrNull() ?: 0
+            val clazz = if (classIdx >= 0) row.getOrNull(classIdx) ?: "" else ""
+
+            val one = countScore(row, targetSecIndices, 1)
+            val two = countScore(row, targetSecIndices, 2)
+            val three = countScore(row, targetSecIndices, 3)
+
+            val key = Key(clazz, g, c, one, two, three)
+            counts[key] = (counts[key] ?: 0) + 1
+        }
+
+        // 同じ Key が2件以上あれば「完全同点あり」
+        return counts.values.any { it > 1 }
+    }
+
 
 
     // 認識結果を安全に初期化（UIのみ）
