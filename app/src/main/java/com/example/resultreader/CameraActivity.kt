@@ -561,12 +561,18 @@ class CameraActivity : AppCompatActivity() {
         }
 
         // 追加: 安全に btnExportS1Csv / btnExportHtml / btnExportPdf にハンドラを登録（IDがあれば動作）
+        // 追加: 安全に btnExportS1Csv / btnExportHtml / btnExportPdf にハンドラを登録（IDがあれば動作）
         val idBtnExportS1 = resources.getIdentifier("btnExportS1Csv", "id", packageName)
         if (idBtnExportS1 != 0) {
             findViewById<ImageButton?>(idBtnExportS1)?.setOnClickListener {
-                PrintableExporter.exportS1CsvToDownloads(this, selectedPattern)
+                // ★ Noluba 向け 公式ラップ形式CSV を出力（旧S1版CSVは廃止）
+                PrintableExporter.exportOfficialLapCsv(
+                    context = this,
+                    pattern = selectedPattern
+                )
             }
         }
+
 
         // HTML and older PDF buttons are disabled/hidden.
         // → もしレイアウトに残っていれば、AMは暫定PDF、PM/Totalは最終PDFとして動かす。
@@ -892,14 +898,17 @@ class CameraActivity : AppCompatActivity() {
             val popup = PopupMenu(this, anchor)
 
             // シンプルに 2 メニューだけに整理
-            popup.menu.add(0, 1, 1, "CSVを保存")
+            popup.menu.add(0, 1, 1, "CSVを保存（公式ラップ形式）")
             popup.menu.add(0, 2, 2, "PDFを保存（Canvas）")
 
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
-                    // S1版CSV 出力（今まで通り）
+                    // ★ Noluba 用：公式ラップ形式 CSV 出力
                     1 -> {
-                        PrintableExporter.exportS1CsvToDownloads(this, selectedPattern)
+                        PrintableExporter.exportOfficialLapCsv(
+                            context = this,
+                            pattern = selectedPattern
+                        )
                         true
                     }
 
@@ -926,6 +935,7 @@ class CameraActivity : AppCompatActivity() {
 
             popup.show()
         }
+
 
 
         val candidateIds = listOf("openCsvImageButton", "openCsvButton", "csvOpenButton", "resultCsvButton")

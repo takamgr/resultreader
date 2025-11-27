@@ -69,6 +69,223 @@ object PrintableExporter {
         return writeToDownloads(context, name, "text/csv", outText.toByteArray(Charsets.UTF_8))
     }
 
+
+    /**
+     * Noluba 向け：1人あたり 2行（Lap1 / Lap2）で出力する公式形式CSV。
+     *
+     * 左から：
+     *  順位 / ラップ / ラップ順位 / エントリーNo / 名前 /
+     *  S1〜SN / G / G計 / C計
+     *
+     * 前提：
+     *  - RRのCSVは SecXX 列が 2ラップ分（= 全Sec列数は 2N 個）
+     *  - 10セク2ラップの場合：
+     *      Lap1 = Sec01〜Sec05（1〜5セク） + Sec11〜Sec15（6〜10セク）
+     *      Lap2 = Sec06〜Sec10（1〜5セク） + Sec16〜Sec20（6〜10セク）
+     *    という並びになっている。
+     *  - 4×3（3ラップ）には対応しない（トーストを出して終了）。
+     *
+     *  重要：
+     *   - 「順位」列には、常に元CSVの TotalRank をそのまま出力する。
+     *   - 並び順も TotalRank 昇順なので、
+     *     exportFinalPdfWithManualTieBreak() で手入力した最終順位がそのまま反映される。
+     */
+    fun exportOfficialLapCsv(context: Context, pattern: TournamentPattern) {
+
+        // 4×3（3ラップ）はまだ対応しない
+        if (pattern == TournamentPattern.PATTERN_4x3) {
+            Toast.makeText(context, "4セク×3ラップ形式はラップCSV未対応です", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // 今日のメインCSV（TotalRank も含まれている official 元データ）
+        val src = resultCsvFile(context, pattern)
+        if (!src.exists()) {
+            Toast.makeText(context, "本日のCSVが見つかりません", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val lines = src.readLines(Charsets.UTF_8)
+        if (lines.isEmpty()) return
+
+        // ---- ヘッダ解析 ----
+        val header = lines.first().split(",").map { it.trim().removePrefix("\uFEFF") }
+
+        fun idx(name: String): Int = header.indexOf(name)
+
+        val idxEntry    = idx("EntryNo")
+        val idxName     = idx("Name")
+        val idxClass    = idx("Class")
+
+        val idxAmG      = idx("AmG")
+        val idxAmC      = idx("AmC")
+        val idxAmRank   = idx("AmRank")
+
+        val idxPmG      = idx("PmG")
+        val idxPmC      = idx("PmC")
+        val idxPmRank   = idx("PmRank")
+
+        val idxTotalG   = idx("TotalG")
+        val idxTotalC   = idx("TotalC")
+        val idxTotalRank= idx("TotalRank")
+
+        if (listOf(
+                idxEntry, idxName, idxClass,
+                idxAmG, idxAmC, idxAmRank,
+                idxPmG, idxPmC, idxPmRank,
+                idxTotalG, idxTotalC, idxTotalRank
+            ).any { it < 0 }
+        ) {
+            Toast.makeText(context, "ヘッダ構造が想定と違います", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // Sec列のインデックスを全部拾う（Sec01, Sec02, ...）
+        val secIndices = header.withIndex()
+            .filter { it.value.matches(Regex("Sec\\d{2}")) }
+            .map { it.index }
+
+        if (secIndices.isEmpty() || secIndices.size % 2 != 0) {
+            Toast.makeText(context, "Sec列数がおかしいです", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // N = セクション数（例：4×2なら8, 5×2なら10）
+        val sectionCount = secIndices.size / 2
+        if (sectionCount % 2 != 0) {
+            Toast.makeText(context, "このセクション数のラップ変換は未対応です", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val half = sectionCount / 2   // 前半セク数（例：10セクのとき 5）
+
+        // Lap1 / Lap2 でどの SecXX を読むか
+        val lap1SecCols = IntArray(sectionCount)
+        val lap2SecCols = IntArray(sectionCount)
+
+        for (s in 1..sectionCount) {
+            val idx0 = s - 1
+            if (s <= half) {
+                // 前半セク：1〜half
+                lap1SecCols[idx0] = secIndices[idx0]                 // Sec01..Sec0half
+                lap2SecCols[idx0] = secIndices[half + idx0]          // Sec(half+1)..
+            } else {
+                // 後半セク：half+1〜N
+                val offset = s - (half + 1)                           // 0..(half-1)
+                lap1SecCols[idx0] = secIndices[sectionCount + offset]       // Sec(N+1)..
+                lap2SecCols[idx0] = secIndices[sectionCount + half + offset]// Sec(N+half+1)..
+            }
+        }
+
+        // ---- 行本体 ----
+        val rows = lines.drop(1).map { it.split(",") }
+
+        fun cell(row: List<String>, i: Int): String =
+            row.getOrNull(i)?.trim('"')?.trim().orEmpty()
+
+        // クラス別にまとめて、クラス内は TotalRank 昇順（= 公式順位の順）で並べる
+        val grouped = rows.groupBy { cell(it, idxClass) }
+
+        val prefs = context.getSharedPreferences("ResultReaderPrefs", Context.MODE_PRIVATE)
+        val classOrder = when (prefs.getString("tournamentType", "beginner")) {
+            "championship" -> listOf("IA", "IB", "NA", "NB")
+            else -> listOf("オープン", "ビギナー")
+        }
+        val orderedClasses = buildList {
+            addAll(classOrder)
+            addAll(grouped.keys.filter { it.isNotBlank() && it !in classOrder }.sorted())
+        }
+
+        // ---- 出力CSVを組み立て ----
+        val sb = StringBuilder()
+
+        // ヘッダ
+        val headerOut = buildList {
+            add("順位")
+            add("ラップ")
+            add("ラップ順位")
+            add("エントリーNo")
+            add("名前")
+            for (s in 1..sectionCount) add("S$s")
+            add("G")
+            add("G計")
+            add("C計")
+        }
+        sb.append(headerOut.joinToString(",")).append("\n")
+
+        // データ行（1人につき Lap1 / Lap2 の2行）
+        for (clazz in orderedClasses) {
+            val list = grouped[clazz].orEmpty()
+                // ★ここがポイント：TotalRank 昇順で並び替え。
+                //  exportFinalPdfWithManualTieBreak() で手入力した TotalRank がそのまま効いてくる。
+                .sortedBy { cell(it, idxTotalRank).toIntOrNull() ?: Int.MAX_VALUE }
+
+            for (r in list) {
+                val entryNo   = cell(r, idxEntry)
+                val name      = cell(r, idxName)
+                val totalRank = cell(r, idxTotalRank)  // ← 手入力後の最終順位
+                val totalG    = cell(r, idxTotalG)
+                val totalC    = cell(r, idxTotalC)
+                val amRank    = cell(r, idxAmRank)
+                val pmRank    = cell(r, idxPmRank)
+                val amG       = cell(r, idxAmG)
+                val pmG       = cell(r, idxPmG)
+
+                // --- Lap1 行 ---
+                val lap1SecValues = (0 until sectionCount).map { secIdx ->
+                    cell(r, lap1SecCols[secIdx])
+                }
+                val rowLap1 = buildList {
+                    add(totalRank)          // 順位（TotalRank そのまま）
+                    add("1")               // ラップ番号
+                    add(amRank)            // ラップ順位（AM）
+                    add(entryNo)
+                    add(name)
+                    addAll(lap1SecValues)
+                    add(amG)               // このラップのG（AmG）
+                    add(totalG)            // 全体G計（TotalG）
+                    add(totalC)            // 全体C計（TotalC）
+                }
+                sb.append(rowLap1.joinToString(",")).append("\n")
+
+                // --- Lap2 行 ---
+                val lap2SecValues = (0 until sectionCount).map { secIdx ->
+                    cell(r, lap2SecCols[secIdx])
+                }
+                val rowLap2 = buildList {
+                    add("")                // 順位は上の行と同じなので空欄
+                    add("2")               // ラップ番号
+                    add(pmRank)            // ラップ順位（PM）
+                    add("")                // エントリーNo（Lap1 行のみ表示）
+                    add("")                // 名前（Lap1 行のみ表示）
+                    addAll(lap2SecValues)
+                    add(pmG)               // このラップのG（PmG）
+                    add("")                // G計（Lap1 行のみ表示）
+                    add("")                // C計（Lap1 行のみ表示）
+                }
+                sb.append(rowLap2.joinToString(",")).append("\n")
+            }
+        }
+
+        // ---- 保存 ----
+        val fileName = "official_lap_${pattern.patternCode}_${todayName()}.csv"
+        val uri = writeToDownloads(
+            context,
+            fileName,
+            "text/csv",
+            sb.toString().toByteArray(Charsets.UTF_8)
+        )
+
+        Toast.makeText(
+            context,
+            if (uri != null) "公式ラップCSVを保存しました ($fileName)" else "CSV保存に失敗しました",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+
+
+
+
     // ───────── HTML（掲示用） ─────────
 
     /** 掲示用：クラスごとに区切り、不要列除外、日本語＋S1見出し、ヘッダ（大会名＋日付）付きでHTML保存 */
@@ -383,9 +600,15 @@ object PrintableExporter {
     )
     // AM暫定PDF と 最終PDF を切り替えるモード
     enum class PdfSessionMode {
-        AM_PROVISIONAL,   // 午前中暫定：A順のみ同率 1,1,3 表示
-        FINAL             // 最終：CSVの順位そのまま（同率なし）
+        // 午前中暫定：AMの成績を使って A順 に同率(1,1,3…)を付ける。
+        // PMやTotalはまだ確定していないので参考表示。
+        AM_PROVISIONAL,
+
+        // 最終掲示：Total順位は CSV のまま（公式順位）。
+        // ただし AM / PM の成績が完全同点の組は、A順 / P順 を同率(1,1,3…)表示にする。
+        FINAL
     }
+
 
 
     // ── 右寄せ対象の判定（数値系は右寄せ）
@@ -844,7 +1067,10 @@ object PrintableExporter {
         }
 
         // ---------- AM暫定PDF用：A順だけ v1.7 ルールで同率(1,1,3...)を振り直す ----------
-        data class AmRankRow(
+        // ---------- AM / PM 共通：完全同点は 1,1,3… 形式の同率ランクにする ----------
+
+        // 1人分の成績（あるセッションの G/C と 1/2/3 点数）を保持するローカルデータクラス
+        data class SessionRankRow(
             val entryNo: String,
             val clazz: String,
             val g: Int,
@@ -854,55 +1080,67 @@ object PrintableExporter {
             val three: Int
         )
 
-        fun buildAmProvisionalRankMap(): Map<String, Int> {
+        /**
+         * あるセッション(AM or PM)について、
+         *  v1.7 正規ルール (G少 / C多 / 1多 / 2多 / 3多) で並べたとき、
+         *  完全同点になった組だけ 1,1,3… の同率ランクを振り直して返す。
+         *
+         * 返り値の Map は EntryNo -> 同率順位。
+         * Map に存在しない人は CSV の順位表示をそのまま使う。
+         */
+        fun buildSessionTieRankMap(
+            gIdx: Int,
+            cIdx: Int,
+            secRange: IntRange
+        ): Map<String, Int> {
             val result = mutableMapOf<String, Int>()
 
             val entryNoIdx = headerNorm.indexOf("EntryNo")
-            val amGIdx = headerNorm.indexOf("AmG")
-            val amCIdx = headerNorm.indexOf("AmC")
+            val classIdx = headerNorm.indexOf("Class")
             val inputIdx = headerNorm.indexOf("入力")
 
-            if (entryNoIdx < 0 || amGIdx < 0 || amCIdx < 0) {
+            if (entryNoIdx < 0 || gIdx < 0 || cIdx < 0 || classIdx < 0) {
                 return emptyMap()
             }
 
-            // AM側だけの Sec 列インデックス
-            val amSecIndices = headerNorm.mapIndexedNotNull { idx, h ->
+            // 対象セッションの Sec 列インデックス
+            val secIndices = headerNorm.mapIndexedNotNull { idx, h ->
                 val m = secRegex.matchEntire(h) ?: return@mapIndexedNotNull null
                 val secNo = m.groupValues[1].toInt()
-                if (secNo in 1..perSession) idx else null
+                if (secNo in secRange) idx else null
             }
 
-            fun countScore(row: List<String>, indices: List<Int>, target: Int): Int =
-                indices.count { idx -> row.getOrNull(idx)?.toIntOrNull() == target }
+            fun countScore(row: List<String>, target: Int): Int =
+                secIndices.count { idx -> row.getOrNull(idx)?.toIntOrNull() == target }
 
+            // クラスごとに処理
             val groupedByClass = rowsAll.groupBy { it.getOrNull(classIdx)?.trim().orEmpty() }
 
             groupedByClass.forEach { (clazz, list) ->
                 if (clazz.isBlank()) return@forEach
 
+                // DNF / DNS / G空欄 は同率ランク計算の対象外
                 val scored = list.mapNotNull { r ->
-                    val entryNo = r.getOrNull(entryNoIdx)
-                        ?.trim()?.trim('"')
-                        ?.takeUnless { it.isNullOrEmpty() } ?: return@mapNotNull null
+                    val entryNo = r.getOrNull(entryNoIdx)?.trim()?.trim('"')
+                    if (entryNo.isNullOrEmpty()) return@mapNotNull null
 
-                    // DNF / DNS 行や AmG 空欄は暫定順位から除外
-                    val g = r.getOrNull(amGIdx)?.toIntOrNull() ?: return@mapNotNull null
+                    val g = r.getOrNull(gIdx)?.toIntOrNull() ?: return@mapNotNull null
 
-                    val inputLabel = if (inputIdx >= 0) r.getOrNull(inputIdx).orEmpty() else ""
+                    val inputLabel =
+                        if (inputIdx >= 0) r.getOrNull(inputIdx).orEmpty() else ""
                     if (inputLabel.contains("DNF") || inputLabel.contains("DNS")) {
                         return@mapNotNull null
                     }
 
-                    val c = r.getOrNull(amCIdx)?.toIntOrNull() ?: 0
-                    val one = countScore(r, amSecIndices, 1)
-                    val two = countScore(r, amSecIndices, 2)
-                    val three = countScore(r, amSecIndices, 3)
+                    val c = r.getOrNull(cIdx)?.toIntOrNull() ?: 0
+                    val one = countScore(r, 1)
+                    val two = countScore(r, 2)
+                    val three = countScore(r, 3)
 
-                    AmRankRow(entryNo, clazz, g, c, one, two, three)
+                    SessionRankRow(entryNo, clazz, g, c, one, two, three)
                 }.sortedWith(
                     // v1.7 正規採点ルール
-                    compareBy<AmRankRow> { it.g }
+                    compareBy<SessionRankRow> { it.g }
                         .thenByDescending { it.c }
                         .thenByDescending { it.one }
                         .thenByDescending { it.two }
@@ -914,8 +1152,7 @@ object PrintableExporter {
                 var i = 0
                 while (i < scored.size) {
                     val base = scored[i]
-                    val same = mutableListOf<AmRankRow>()
-                    same.add(base)
+                    val same = mutableListOf(base)
                     var j = i + 1
                     while (j < scored.size) {
                         val t = scored[j]
@@ -927,9 +1164,16 @@ object PrintableExporter {
                         ) {
                             same.add(t)
                             j++
-                        } else break
+                        } else {
+                            break
+                        }
                     }
-                    same.forEach { r -> result[r.entryNo] = pos }
+
+                    if (same.size > 1) {
+                        // 完全同点だけ同率順位を記録
+                        same.forEach { r -> result[r.entryNo] = pos }
+                    }
+                    // pos は常に「何人目か」で進める（例: 1,1,3,4,...）
                     pos += same.size
                     i = j
                 }
@@ -938,9 +1182,26 @@ object PrintableExporter {
             return result
         }
 
-        val amProvisionalRanks: Map<String, Int> =
-            if (sessionMode == PdfSessionMode.AM_PROVISIONAL) buildAmProvisionalRankMap()
-            else emptyMap()
+        // AM側は Sec01〜Sec( perSession ) を対象に同率ランク計算
+        val amTieRankMap: Map<String, Int> = buildSessionTieRankMap(
+            gIdx = headerNorm.indexOf("AmG"),
+            cIdx = headerNorm.indexOf("AmC"),
+            secRange = 1..perSession
+        )
+
+        // PM側は Sec(perSession+1)〜Sec(totalSec) を対象に同率ランク計算
+        // AM暫定モードでは P順は表示しない想定なので空にしておく。
+        val pmTieRankMap: Map<String, Int> =
+            if (sessionMode == PdfSessionMode.AM_PROVISIONAL) {
+                emptyMap()
+            } else {
+                buildSessionTieRankMap(
+                    gIdx = headerNorm.indexOf("PmG"),
+                    cIdx = headerNorm.indexOf("PmC"),
+                    secRange = (perSession + 1)..totalSec
+                )
+            }
+
 
         // ---------- 描画用 Paint ----------
         val pageW = 842
@@ -1203,7 +1464,7 @@ object PrintableExporter {
                         }
                     }
 
-                    // セル文字（全列中央揃え・A順は AM暫定モードなら 1,1,3… に差し替え）
+                    // セル文字（全列中央揃え・A順 / P順 は同率マップで差し替え）
                     val baseLineY = y
                     headers.indices.forEach { i ->
                         val rawValue = row.getOrNull(keep[i])?.trim('"')?.trim().orEmpty()
@@ -1211,14 +1472,26 @@ object PrintableExporter {
 
                         var text = rawValue
 
-                        if (sessionMode == PdfSessionMode.AM_PROVISIONAL && headerLabel == "A順") {
-                            val entryNoForRow: String? =
-                                if (entryNoIdxInKeep >= 0)
-                                    row.getOrNull(keep[entryNoIdxInKeep])?.trim('"')?.trim()
-                                else null
-                            val rank = entryNoForRow?.let { amProvisionalRanks[it] }
-                            if (rank != null) {
-                                text = rank.toString()
+                        // EntryNo（素の番号）は A順 / P順 の上書きに使う
+                        val entryNoForRow: String? =
+                            if (entryNoIdxInKeep >= 0)
+                                row.getOrNull(keep[entryNoIdxInKeep])?.trim('"')?.trim()
+                            else null
+
+                        when (headerLabel) {
+                            "A順" -> {
+                                // AM成績が完全同点の組だけ 1,1,3… を表示
+                                val rank = entryNoForRow?.let { amTieRankMap[it] }
+                                if (rank != null) {
+                                    text = rank.toString()
+                                }
+                            }
+                            "P順" -> {
+                                // PM成績が完全同点の組だけ 1,1,3… を表示
+                                val rank = entryNoForRow?.let { pmTieRankMap[it] }
+                                if (rank != null) {
+                                    text = rank.toString()
+                                }
                             }
                         }
 
@@ -1228,6 +1501,7 @@ object PrintableExporter {
                         val x = left + (right - left - w) / 2f
                         c.drawText(text, x, baseLineY, pText)
                     }
+
 
                     lastRowBottom = rowBottom
                     horizontalLines += rowBottom
@@ -1328,4 +1602,7 @@ object PrintableExporter {
             if (anySaved) "✅ クラス別PDF（1クラス=1ファイル）を保存しました" else "❌ PDF出力なし",
             Toast.LENGTH_SHORT
         ).show()
+
+
+
     }}
