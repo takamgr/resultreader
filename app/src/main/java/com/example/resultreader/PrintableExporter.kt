@@ -1005,8 +1005,23 @@ object PrintableExporter {
 
         // ---------- クラスごとにPDF出力 ----------
         for (clazz in classes) {
-            val list = grouped[clazz].orEmpty()
-            if (list.isEmpty()) continue
+            val originalList = grouped[clazz].orEmpty()
+            if (originalList.isEmpty()) continue
+
+            // ★ FINALモードのときだけ TotalRank 昇順に並べ替えてから描画する
+            val list = if (sessionMode == PdfSessionMode.FINAL) {
+                val totalRankIdx = headerNorm.indexOf("TotalRank")
+                if (totalRankIdx >= 0) {
+                    originalList.sortedBy { row ->
+                        row.getOrNull(totalRankIdx)?.toIntOrNull() ?: Int.MAX_VALUE
+                    }
+                } else {
+                    originalList
+                }
+            } else {
+                // AM暫定などは元の並び（CsvExporter が付けた自動順）をそのまま使う
+                originalList
+            }
 
             val pdf = PdfDocument()
             val chunks = list.chunked(rowsPerPage)
@@ -1313,5 +1328,4 @@ object PrintableExporter {
             if (anySaved) "✅ クラス別PDF（1クラス=1ファイル）を保存しました" else "❌ PDF出力なし",
             Toast.LENGTH_SHORT
         ).show()
-
     }}

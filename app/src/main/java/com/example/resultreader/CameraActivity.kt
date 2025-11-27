@@ -589,24 +589,25 @@ class CameraActivity : AppCompatActivity() {
             }
         }
 
-        val idBtnExportPdf = resources.getIdentifier("btnExportPdf", "id", packageName)
+             val idBtnExportPdf = resources.getIdentifier("btnExportPdf", "id", packageName)
         if (idBtnExportPdf != 0) {
             findViewById<ImageButton?>(idBtnExportPdf)?.setOnClickListener {
-                // AMなら暫定PDF、PM/Totalは最終PDF
-                val mode =
-                    if (currentSession == "AM")
-                        PrintableExporter.PdfSessionMode.AM_PROVISIONAL
-                    else
-                        PrintableExporter.PdfSessionMode.FINAL
-
-                PrintableExporter.exportPrintablePdfStyledSplitByClass(
-                    context = this,
-                    pattern = selectedPattern,
-                    rowsPerPage = 20,
-                    sessionMode = mode
-                )
+                // AM は暫定掲示用（同率 1,1,3...）PDF、PM/総合は完全確定版PDF
+                if (currentSession == "AM") {
+                    // AM暫定PDF：AmRankのみ 1,1,3… の同率表示
+                    PrintableExporter.exportPrintablePdfStyledSplitByClass(
+                        context = this,
+                        pattern = selectedPattern,
+                        rowsPerPage = 20,
+                        sessionMode = PrintableExporter.PdfSessionMode.AM_PROVISIONAL
+                    )
+                } else {
+                    // PM / 総合：完全同点があれば TotalRank を手入力してから FINAL PDF を出力
+                    exportFinalPdfWithManualTieBreak()
+                }
             }
         }
+
 
 
         // その後に SharedPreferences → 設定ダイアログ呼び出し！
@@ -886,89 +887,48 @@ class CameraActivity : AppCompatActivity() {
         }
 
         // --- 追記: 右上のCSVボタン候補を探索し、長押しで出力メニューを表示 ---
+        // CSV / PDF 出力メニュー（長押し）
         fun setupExportLongPress(anchor: View) {
             val popup = PopupMenu(this, anchor)
 
-            popup.menu.add(0, 3, 2, "CSVを保存")
-            // Canvasベースの安定版PDF出力を追加
-            popup.menu.add(0, 5, 3, "PDFを保存（Canvas）")
-            // optional: popup.menu.add(0, 4, 3, "PDFを開く/印刷")
+            // シンプルに 2 メニューだけに整理
+            popup.menu.add(0, 1, 1, "CSVを保存")
+            popup.menu.add(0, 2, 2, "PDFを保存（Canvas）")
 
             popup.setOnMenuItemClickListener { item ->
-                 when (item.itemId) {
+                when (item.itemId) {
+                    // S1版CSV 出力（今まで通り）
                     1 -> {
-                        // S1版CSV（HTML path removed; keep S1 CSV)
                         PrintableExporter.exportS1CsvToDownloads(this, selectedPattern)
                         true
                     }
+
+                    // PDF 出力
                     2 -> {
-
-                        // Canvas unified PDF (per-class single page behavior folded into unified renderer)
-                        val mode =
-                            if (currentSession == "AM")
-                                PrintableExporter.PdfSessionMode.AM_PROVISIONAL
-                            else
-                                PrintableExporter.PdfSessionMode.FINAL
-
-                        PrintableExporter.exportPrintablePdfStyledSplitByClass(
-                            context = this,
-                            pattern = selectedPattern,
-                            rowsPerPage = 20,
-                            sessionMode = mode
-                        )
-
+                        if (currentSession == "AM") {
+                            // 午前中：暫定PDF（A順だけ 1,1,3… 表示）
+                            PrintableExporter.exportPrintablePdfStyledSplitByClass(
+                                context = this,
+                                pattern = selectedPattern,
+                                rowsPerPage = 20,
+                                sessionMode = PrintableExporter.PdfSessionMode.AM_PROVISIONAL
+                            )
+                        } else {
+                            // PM / 総合：完全同点があれば手入力で TotalRank を確定してから FINAL PDF
+                            exportFinalPdfWithManualTieBreak()
+                        }
                         true
                     }
 
-
-
-                    5 -> {
-                        // Canvas PDF with per-row thin lines enabled for visual verification
-                        val mode =
-                            if (currentSession == "AM")
-                                PrintableExporter.PdfSessionMode.AM_PROVISIONAL
-                            else
-                                PrintableExporter.PdfSessionMode.FINAL
-
-                        PrintableExporter.exportPrintablePdfStyledSplitByClass(
-                            context = this,
-                            pattern = selectedPattern,
-                            rowsPerPage = 20,
-                            sessionMode = mode
-                        )
-
-                        true
-                    }
-
-                    3 -> {
-                        PrintableExporter.exportS1CsvToDownloads(this, selectedPattern)
-                        true
-                    }
-                    4 -> {
-                        // legacy: map to unified Canvas exporter
-                        val mode =
-                            if (currentSession == "AM")
-                                PrintableExporter.PdfSessionMode.AM_PROVISIONAL
-                            else
-                                PrintableExporter.PdfSessionMode.FINAL
-
-                        PrintableExporter.exportPrintablePdfStyledSplitByClass(
-                            context = this,
-                            pattern = selectedPattern,
-                            rowsPerPage = 20,
-                            sessionMode = mode
-                        )
-
-                        true
-                    }
-                     else -> false
-                 }
-             }
+                    else -> false
+                }
+            }
 
             popup.show()
         }
 
-            val candidateIds = listOf("openCsvImageButton", "openCsvButton", "csvOpenButton", "resultCsvButton")
+
+        val candidateIds = listOf("openCsvImageButton", "openCsvButton", "csvOpenButton", "resultCsvButton")
         val anchorView = candidateIds
             .map { resources.getIdentifier(it, "id", packageName) }
             .mapNotNull { findViewById<View?>(it) }
@@ -982,6 +942,401 @@ class CameraActivity : AppCompatActivity() {
 
     // 保存種別（通常 / DNF / DNS）
     private enum class SaveStatus { NORMAL, DNF, DNS }
+
+    /**
+     * PM / TOTAL 用：完全同点がある場合は TotalRank を手入力で確定してから
+     * 最終PDF（FINAL）を出力する。
+     *
+     * - AM セッションからは呼ばないこと（AM は暫定PDFのみ）
+     */
+    // CameraActivity.kt 内（クラスのメンバ関数）
+    // CameraActivity.kt のメンバ関数
+    /**
+     * PM / TOTAL 用：完全同点がある場合は TotalRank を手入力してから
+     * 最終PDF（FINAL）を出力する。
+     *
+     * - AM セッションからは呼ばないこと（AM は暫定PDFのみ）
+     * - 「完全同点」の定義は hasPerfectTieV17 と完全一致（G/C/1/2/3＋クラス）
+     */
+    private fun exportFinalPdfWithManualTieBreak() {
+        val pattern = selectedPattern
+
+        // 今日のCSV
+        val today = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
+        val csvFile = File(
+            getExternalFilesDir("ResultReader"),
+            "result_${pattern.patternCode}_${today}.csv"
+        )
+
+        if (!csvFile.exists()) {
+            Toast.makeText(this, "本日のCSVが見つかりません（最終PDF）", Toast.LENGTH_SHORT).show()
+            PrintableExporter.exportPrintablePdfStyledSplitByClass(
+                context = this,
+                pattern = pattern,
+                rowsPerPage = 20,
+                sessionMode = PrintableExporter.PdfSessionMode.FINAL
+            )
+            return
+        }
+
+        val lines = csvFile.readLines(Charsets.UTF_8)
+        if (lines.size <= 1) {
+            // データ行がないときはそのままFINAL
+            PrintableExporter.exportPrintablePdfStyledSplitByClass(
+                context = this,
+                pattern = pattern,
+                rowsPerPage = 20,
+                sessionMode = PrintableExporter.PdfSessionMode.FINAL
+            )
+            return
+        }
+
+        // ヘッダ（BOM/余白除去）
+        val headerRaw = lines.first().split(",")
+            .map { it.trim().removePrefix("\uFEFF") }
+
+        // データ行（書き換えたいので MutableList 化）
+        val rows: MutableList<MutableList<String>> =
+            lines.drop(1).map { it.split(",").toMutableList() }.toMutableList()
+
+        val idxEntry    = headerRaw.indexOf("EntryNo")
+        val idxName     = headerRaw.indexOf("Name")
+        val idxClass    = headerRaw.indexOf("Class")
+        val idxTotalG   = headerRaw.indexOf("TotalG")
+        val idxTotalC   = headerRaw.indexOf("TotalC")
+        val idxTotalRank= headerRaw.indexOf("TotalRank")
+        val idxInput    = headerRaw.indexOf("入力")
+
+        if (idxEntry < 0 || idxClass < 0 || idxTotalG < 0 || idxTotalC < 0 || idxInput < 0) {
+            // ヘッダが想定と違う → 安全側でそのままFINAL
+            Toast.makeText(this, "ヘッダ解析エラー（最終PDF）", Toast.LENGTH_LONG).show()
+            PrintableExporter.exportPrintablePdfStyledSplitByClass(
+                context = this,
+                pattern = pattern,
+                rowsPerPage = 20,
+                sessionMode = PrintableExporter.PdfSessionMode.FINAL
+            )
+            return
+        }
+
+        // hasPerfectTieV17 と同じ定義で「Total完全同点」が存在するか確認
+        val rowsForCheck: List<List<String>> = rows.map { it.toList() }
+        val hasTotalPerfectTie = hasPerfectTieV17(
+            header = headerRaw,
+            rows   = rowsForCheck,
+            inputIdx = idxInput,
+            gIdx     = idxTotalG,
+            cIdx     = idxTotalC,
+            session  = "TOTAL"
+        )
+
+        if (!hasTotalPerfectTie) {
+            // 完全同点がなければそのまま FINAL
+            Toast.makeText(
+                this,
+                "最終完全同点はありません（そのまま最終PDFを出力します）",
+                Toast.LENGTH_SHORT
+            ).show()
+
+            PrintableExporter.exportPrintablePdfStyledSplitByClass(
+                context = this,
+                pattern = pattern,
+                rowsPerPage = 20,
+                sessionMode = PrintableExporter.PdfSessionMode.FINAL
+            )
+            return
+        }
+
+        // ───────── ここから「完全同点グループ」を抽出（hasPerfectTieV17 と同じキー定義） ─────────
+
+        // Sec列インデックス（Total の 1/2/3 カウントに使う）
+        val secIndices: List<Int> = headerRaw.mapIndexedNotNull { i, h ->
+            if (h.matches(Regex("Sec\\d{2}"))) i else null
+        }
+
+        fun countScore(row: List<String>, indices: List<Int>, target: Int): Int {
+            return indices.count { idx -> row.getOrNull(idx)?.toIntOrNull() == target }
+        }
+
+        data class TieKey(
+            val clazz: String,
+            val g: Int,
+            val c: Int,
+            val one: Int,
+            val two: Int,
+            val three: Int
+        )
+
+        data class TieMember(
+            val rowIndex: Int,
+            val row: MutableList<String>,
+            val entryNo: String,
+            val name: String,
+            val clazz: String,
+            val g: Int,
+            val c: Int,
+            val one: Int,
+            val two: Int,
+            val three: Int,
+            val rank: Int
+        )
+
+        val tieMap = mutableMapOf<TieKey, MutableList<TieMember>>()
+
+        rows.forEachIndexed { index, row ->
+            // DNS / DNF 系は除外（hasPerfectTieV17 と同じ前提）
+            val inputLabel = row.getOrNull(idxInput).orEmpty()
+            if (inputLabel == "DNS" || inputLabel.contains("DNF")) return@forEachIndexed
+
+            val g = row.getOrNull(idxTotalG)?.toIntOrNull() ?: return@forEachIndexed
+            val c = row.getOrNull(idxTotalC)?.toIntOrNull() ?: 0
+
+            val clazz = row.getOrNull(idxClass)?.trim().orEmpty()
+            if (clazz.isBlank()) return@forEachIndexed
+
+            val entryNo = row.getOrNull(idxEntry)?.trim().orEmpty()
+            if (entryNo.isBlank()) return@forEachIndexed
+
+            val name = if (idxName >= 0) row.getOrNull(idxName)?.trim().orEmpty() else ""
+
+            // TOTAL のセクションで 1点/2点/3点数をカウント（hasPerfectTieV17 の TOTAL と同じ）
+            val one   = countScore(row, secIndices, 1)
+            val two   = countScore(row, secIndices, 2)
+            val three = countScore(row, secIndices, 3)
+
+            val rank = if (idxTotalRank >= 0) {
+                row.getOrNull(idxTotalRank)?.toIntOrNull() ?: Int.MAX_VALUE
+            } else {
+                Int.MAX_VALUE
+            }
+
+            val key = TieKey(clazz, g, c, one, two, three)
+            val list = tieMap.getOrPut(key) { mutableListOf() }
+            list.add(
+                TieMember(
+                    rowIndex = index,
+                    row      = row,
+                    entryNo  = entryNo,
+                    name     = name,
+                    clazz    = clazz,
+                    g = g, c = c,
+                    one = one, two = two, three = three,
+                    rank = rank
+                )
+            )
+        }
+
+        // 同じキーで 2人以上いるグループだけ抽出（＝完全同点グループ）
+        val tieGroups: List<List<TieMember>> =
+            tieMap.values.filter { it.size >= 2 }
+
+        if (tieGroups.isEmpty()) {
+            // 理論上ここには来ないはずだが、安全側でFINAL出力
+            Toast.makeText(
+                this,
+                "完全同点グループが見つかりませんでした（そのまま最終PDFを出力します）",
+                Toast.LENGTH_SHORT
+            ).show()
+
+            PrintableExporter.exportPrintablePdfStyledSplitByClass(
+                context = this,
+                pattern = pattern,
+                rowsPerPage = 20,
+                sessionMode = PrintableExporter.PdfSessionMode.FINAL
+            )
+            return
+        }
+
+        // 表示順：クラス → もともとの TotalRank（小さい順）
+        val orderedGroups = tieGroups.sortedWith(
+            compareBy<List<TieMember>> { it.first().clazz }
+                .thenBy { it.minOf { m -> m.rank } }
+        )
+
+        // サマリー文字列（何クラスのどこで完全同点が発生しているか一覧表示）
+        val summary = StringBuilder().apply {
+            appendLine("最終完全同点があります（G/C/1/2/3 全一致）。")
+            appendLine("TotalRank を確定してから最終PDFを出力してください。")
+            appendLine()
+            orderedGroups.forEach { group ->
+                val clazz = group.first().clazz
+                val baseRank = group.minOf { it.rank }
+                append("【${clazz}クラス / ${if (baseRank == Int.MAX_VALUE) "順位未設定" else "${baseRank}位付近"}  同点${group.size}名】")
+                    .appendLine()
+                group.sortedBy { it.entryNo.toIntOrNull() ?: Int.MAX_VALUE }.forEach { m ->
+                    append("No.${m.entryNo}  ${m.name}  (G=${m.g}, C=${m.c}, 1s=${m.one}, 2s=${m.two}, 3s=${m.three})")
+                        .appendLine()
+                }
+                appendLine()
+            }
+        }.toString()
+
+        // ───────── グループごとに TotalRank を手入力させるダイアログ ─────────
+
+        fun showEditDialogForGroup(
+            index: Int,
+            currentRows: MutableList<MutableList<String>>,
+            onAllDone: () -> Unit
+        ) {
+            if (index >= orderedGroups.size) {
+                onAllDone()
+                return
+            }
+
+            val group = orderedGroups[index].sortedBy { it.rank }
+
+            val density = resources.displayMetrics.density
+            val padding = (16 * density).toInt()
+            val labelPadding = (4 * density).toInt()
+            val editWidth = (64 * density).toInt()
+
+            val container = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(padding, padding, padding, padding)
+            }
+
+            val editFields = mutableListOf<Pair<TieMember, EditText>>()
+
+            group.forEach { member ->
+                val rowLayout = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    setPadding(0, labelPadding, 0, labelPadding)
+                    weightSum = 1f
+                }
+
+                val label = TextView(this).apply {
+                    text =
+                        "No.${member.entryNo} ${member.name} (${member.clazz})  G=${member.g}  C=${member.c}"
+                    setPadding(0, 0, (8 * density).toInt(), 0)
+                    layoutParams = LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                    )
+                }
+
+                val edit = EditText(this).apply {
+                    inputType = InputType.TYPE_CLASS_NUMBER
+                    setEms(3)
+                    setText(
+                        if (member.rank == Int.MAX_VALUE) ""
+                        else member.rank.toString()
+                    )
+                    gravity = android.view.Gravity.CENTER
+                    layoutParams = LinearLayout.LayoutParams(
+                        editWidth,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    )
+                }
+
+                rowLayout.addView(label)
+                rowLayout.addView(edit)
+                container.addView(rowLayout)
+
+                editFields += member to edit
+            }
+
+            val dialog = AlertDialog.Builder(this)
+                .setTitle("順位を入力 (${index + 1}/${orderedGroups.size})")
+                .setMessage("この完全同点グループの最終順位（TotalRank）を入力してください。\n※同じ数字を複数人に付けないでください。")
+                .setView(container)
+                .setNegativeButton("キャンセル", null)
+                .setPositiveButton("この順位で確定", null)
+                .create()
+
+            dialog.setOnShowListener {
+                val button = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                button.setOnClickListener {
+                    val used = mutableSetOf<Int>()
+                    val updates = mutableListOf<Pair<TieMember, Int>>()
+
+                    for ((member, edit) in editFields) {
+                        val text = edit.text.toString().trim()
+                        val rank = text.toIntOrNull()
+                        if (rank == null || rank <= 0) {
+                            Toast.makeText(this, "正しい順位を入力してください", Toast.LENGTH_SHORT).show()
+                            return@setOnClickListener
+                        }
+                        if (!used.add(rank)) {
+                            Toast.makeText(this, "同じ順位が重複しています", Toast.LENGTH_SHORT).show()
+                            return@setOnClickListener
+                        }
+                        updates += member to rank
+                    }
+
+                    // OK → CSV行を更新
+                    updates.forEach { (member, newRank) ->
+                        val row = currentRows[member.rowIndex]
+                        if (idxTotalRank >= 0) {
+                            // 既存 TotalRank 列を書き換え
+                            if (idxTotalRank >= row.size) {
+                                // 万一列数が足りない場合は末尾に足しておく
+                                while (row.size <= idxTotalRank) {
+                                    row.add("")
+                                }
+                            }
+                            row[idxTotalRank] = newRank.toString()
+                        }
+                    }
+
+                    dialog.dismiss()
+                    // 次のグループへ
+                    showEditDialogForGroup(index + 1, currentRows, onAllDone)
+                }
+            }
+
+            dialog.show()
+        }
+
+        // まずサマリーダイアログ → 「順位を決める」で入力ループへ
+        AlertDialog.Builder(this)
+            .setTitle("最終完全同点チェック")
+            .setMessage(summary)
+            .setNegativeButton("キャンセル", null)
+            .setPositiveButton("順位を決める") { _, _ ->
+                showEditDialogForGroup(
+                    index = 0,
+                    currentRows = rows
+                ) {
+                    // 全グループ入力完了 → CSV保存 → FINAL PDF
+                    try {
+                        BufferedWriter(
+                            OutputStreamWriter(
+                                FileOutputStream(csvFile, false),
+                                Charsets.UTF_8
+                            )
+                        ).use { writer ->
+                            writer.write("\uFEFF")
+                            writer.write(headerRaw.joinToString(","))
+                            writer.newLine()
+                            rows.forEach { r ->
+                                writer.write(r.joinToString(","))
+                                writer.newLine()
+                            }
+                        }
+                        Toast.makeText(this, "TotalRank を更新しました", Toast.LENGTH_SHORT).show()
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        Toast.makeText(
+                            this,
+                            "CSV更新に失敗しました: ${e.message}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+
+                    PrintableExporter.exportPrintablePdfStyledSplitByClass(
+                        context = this,
+                        pattern = pattern,
+                        rowsPerPage = 20,
+                        sessionMode = PrintableExporter.PdfSessionMode.FINAL
+                    )
+                }
+            }
+            .show()
+    }
+
+
+
 
     // 保存種別ごとの共通保存フロー
     private fun requestSaveWithStatus(status: SaveStatus) {
