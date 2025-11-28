@@ -70,36 +70,29 @@ object PrintableExporter {
     }
 
 
-    /**
-     * Noluba 向け：1人あたり 2行（Lap1 / Lap2）で出力する公式形式CSV。
-     *
-     * 左から：
-     *  順位 / ラップ / ラップ順位 / エントリーNo / 名前 /
-     *  S1〜SN / G / G計 / C計
-     *
-     * 前提：
-     *  - RRのCSVは SecXX 列が 2ラップ分（= 全Sec列数は 2N 個）
-     *  - 10セク2ラップの場合：
-     *      Lap1 = Sec01〜Sec05（1〜5セク） + Sec11〜Sec15（6〜10セク）
-     *      Lap2 = Sec06〜Sec10（1〜5セク） + Sec16〜Sec20（6〜10セク）
-     *    という並びになっている。
-     *  - 4×3（3ラップ）には対応しない（トーストを出して終了）。
-     *
-     *  重要：
-     *   - 「順位」列には、常に元CSVの TotalRank をそのまま出力する。
-     *   - 並び順も TotalRank 昇順なので、
-     *     exportFinalPdfWithManualTieBreak() で手入力した最終順位がそのまま反映される。
-     */
+    // ─────────────────────────────
+// Noluba用 公式ラップCSV
+// 4×2 / 5×2 / 4×3(=8セク3ラップ) 対応
+// 見出し：順位 / Lap / エントリーNo / 名前 / S1.. / G / G計 / C計
+// ・順位は TotalRank（手入力済みの最終順位）
+// ・G/C は Lapごとに Sec から再計算
+// ・G計/C計 は Lap1 からの累計
+// ─────────────────────────────
+    // ─────────────────────────────
+// Noluba用 公式ラップCSV
+// 4×2 / 5×2 / 4×3(=8セク3ラップ) 対応
+// 見出し：順位 / Lap / エントリーNo / 名前 / S1.. / G / G計 / C計
+// ・順位は TotalRank（手入力済みの最終順位）
+// ・G は LapごとのG（減点）
+// ・G計 / C計 は合計のみを Lap1 行に表示（Lap2以降は空欄）
+// ─────────────────────────────
     fun exportOfficialLapCsv(context: Context, pattern: TournamentPattern) {
 
-        // 4×3（3ラップ）はまだ対応しない
-        if (pattern == TournamentPattern.PATTERN_4x3) {
-            Toast.makeText(context, "4セク×3ラップ形式はラップCSV未対応です", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        // 今日のメインCSV（TotalRank も含まれている official 元データ）
-        val src = resultCsvFile(context, pattern)
+        // 今日のRR CSVを読む
+        val src = File(
+            context.getExternalFilesDir("ResultReader"),
+            "result_${pattern.patternCode}_${todayName()}.csv"
+        )
         if (!src.exists()) {
             Toast.makeText(context, "本日のCSVが見つかりません", Toast.LENGTH_SHORT).show()
             return
@@ -108,81 +101,139 @@ object PrintableExporter {
         val lines = src.readLines(Charsets.UTF_8)
         if (lines.isEmpty()) return
 
-        // ---- ヘッダ解析 ----
+        // ヘッダ
         val header = lines.first().split(",").map { it.trim().removePrefix("\uFEFF") }
-
         fun idx(name: String): Int = header.indexOf(name)
 
-        val idxEntry    = idx("EntryNo")
-        val idxName     = idx("Name")
-        val idxClass    = idx("Class")
+        val idxEntry = idx("EntryNo")
+        val idxName = idx("Name")
+        val idxClass = idx("Class")
 
-        val idxAmG      = idx("AmG")
-        val idxAmC      = idx("AmC")
-        val idxAmRank   = idx("AmRank")
+        val idxTotalG = idx("TotalG")
+        val idxTotalC = idx("TotalC")
+        val idxTotalRank = idx("TotalRank")
 
-        val idxPmG      = idx("PmG")
-        val idxPmC      = idx("PmC")
-        val idxPmRank   = idx("PmRank")
-
-        val idxTotalG   = idx("TotalG")
-        val idxTotalC   = idx("TotalC")
-        val idxTotalRank= idx("TotalRank")
-
-        if (listOf(
-                idxEntry, idxName, idxClass,
-                idxAmG, idxAmC, idxAmRank,
-                idxPmG, idxPmC, idxPmRank,
-                idxTotalG, idxTotalC, idxTotalRank
-            ).any { it < 0 }
-        ) {
+        if (listOf(idxEntry, idxName, idxClass, idxTotalG, idxTotalC, idxTotalRank).any { it < 0 }) {
             Toast.makeText(context, "ヘッダ構造が想定と違います", Toast.LENGTH_SHORT).show()
             return
         }
 
-        // Sec列のインデックスを全部拾う（Sec01, Sec02, ...）
+        // Sec列をすべて取得（Sec01, Sec02...）
         val secIndices = header.withIndex()
             .filter { it.value.matches(Regex("Sec\\d{2}")) }
             .map { it.index }
 
-        if (secIndices.isEmpty() || secIndices.size % 2 != 0) {
-            Toast.makeText(context, "Sec列数がおかしいです", Toast.LENGTH_SHORT).show()
+        if (secIndices.isEmpty()) {
+            Toast.makeText(context, "Sec列が見つかりません", Toast.LENGTH_SHORT).show()
             return
         }
 
-        // N = セクション数（例：4×2なら8, 5×2なら10）
-        val sectionCount = secIndices.size / 2
-        if (sectionCount % 2 != 0) {
-            Toast.makeText(context, "このセクション数のラップ変換は未対応です", Toast.LENGTH_SHORT).show()
-            return
+        val totalSec = secIndices.size          // 4×2=16, 5×2=20, 4×3=24 を想定
+        val laps = when (pattern) {
+            TournamentPattern.PATTERN_4x3 -> 3
+            TournamentPattern.PATTERN_4x2,
+            TournamentPattern.PATTERN_5x2 -> 2
         }
-        val half = sectionCount / 2   // 前半セク数（例：10セクのとき 5）
 
-        // Lap1 / Lap2 でどの SecXX を読むか
-        val lap1SecCols = IntArray(sectionCount)
-        val lap2SecCols = IntArray(sectionCount)
-
-        for (s in 1..sectionCount) {
-            val idx0 = s - 1
-            if (s <= half) {
-                // 前半セク：1〜half
-                lap1SecCols[idx0] = secIndices[idx0]                 // Sec01..Sec0half
-                lap2SecCols[idx0] = secIndices[half + idx0]          // Sec(half+1)..
-            } else {
-                // 後半セク：half+1〜N
-                val offset = s - (half + 1)                           // 0..(half-1)
-                lap1SecCols[idx0] = secIndices[sectionCount + offset]       // Sec(N+1)..
-                lap2SecCols[idx0] = secIndices[sectionCount + half + offset]// Sec(N+half+1)..
+        // 1Lapあたりの「表示セクション数」（S列の本数）
+        val sectionsPerLap: Int = when (pattern) {
+            // 8セク3ラップ → S1〜S8
+            TournamentPattern.PATTERN_4x3 -> 8
+            // 4×2=8セク, 5×2=10セク → そのまま半分
+            else -> {
+                if (totalSec % 2 != 0) {
+                    Toast.makeText(context, "Sec列数が想定と違います", Toast.LENGTH_SHORT).show()
+                    return
+                }
+                totalSec / 2
             }
         }
 
-        // ---- 行本体 ----
+        // ---- Lapごとの SecXX → S列マッピング ----
+        // 返り値: lapSecCols[lap][sIndex] = 元CSVの列インデックス
+        val lapSecCols: List<List<Int>> = when (pattern) {
+
+            // ★ 4×3 専用マッピング ★
+            // 午前 Sec1〜4 / 5〜8 / 9〜12 → 各Lapの S1〜S4
+            // 午後 Sec13〜16 / 17〜20 / 21〜24 → 各Lapの S5〜S8
+            TournamentPattern.PATTERN_4x3 -> {
+                if (totalSec != 24) {
+                    Toast.makeText(context, "4×3形式のSec列数が24ではありません", Toast.LENGTH_SHORT).show()
+                    return
+                }
+
+                val am = secIndices.subList(0, 12)   // Sec01〜Sec12
+                val pm = secIndices.subList(12, 24) // Sec13〜Sec24
+
+                listOf(
+                    // Lap1: AM(1〜4) + PM(13〜16)
+                    listOf(
+                        am[0], am[1], am[2], am[3],
+                        pm[0], pm[1], pm[2], pm[3]
+                    ),
+                    // Lap2: AM(5〜8) + PM(17〜20)
+                    listOf(
+                        am[4], am[5], am[6], am[7],
+                        pm[4], pm[5], pm[6], pm[7]
+                    ),
+                    // Lap3: AM(9〜12) + PM(21〜24)
+                    listOf(
+                        am[8], am[9], am[10], am[11],
+                        pm[8], pm[9], pm[10], pm[11]
+                    )
+                )
+            }
+
+            // ★ 4×2 / 5×2 ★
+            // 午前の前半＋午後の前半 → Lap1
+            // 午前の後半＋午後の後半 → Lap2
+            else -> {
+                val sectionCount = sectionsPerLap     // 例: 8 or 10
+                val half = sectionCount / 2           // 例: 4 or 5
+
+                val lap1SecCols = IntArray(sectionCount)
+                val lap2SecCols = IntArray(sectionCount)
+
+                for (s in 1..sectionCount) {
+                    val idx0 = s - 1
+                    if (s <= half) {
+                        // 前半セク：1〜half
+                        lap1SecCols[idx0] = secIndices[idx0]
+                        lap2SecCols[idx0] = secIndices[half + idx0]
+                    } else {
+                        // 後半セク：half+1〜sectionCount
+                        val offset = s - (half + 1) // 0..(half-1)
+                        lap1SecCols[idx0] = secIndices[sectionCount + offset]
+                        lap2SecCols[idx0] = secIndices[sectionCount + half + offset]
+                    }
+                }
+
+                listOf(lap1SecCols.toList(), lap2SecCols.toList())
+            }
+        }
+
+        // 行データ
         val rows = lines.drop(1).map { it.split(",") }
 
         fun cell(row: List<String>, i: Int): String =
             row.getOrNull(i)?.trim('"')?.trim().orEmpty()
 
-        // クラス別にまとめて、クラス内は TotalRank 昇順（= 公式順位の順）で並べる
+        // Lapごとの G/C 再計算用
+        fun calcLapGC(row: List<String>, secCols: List<Int>): Pair<Int, Int> {
+            var g = 0
+            var c = 0
+            for (col in secCols) {
+                val vStr = row.getOrNull(col)?.trim('"')?.trim()
+                val v = vStr?.toIntOrNull()
+                if (v != null && v != 99) {   // 99はエラー値として集計から除外
+                    g += v
+                    if (v == 0) c++
+                }
+            }
+            return g to c
+        }
+
+        // クラスごと
         val grouped = rows.groupBy { cell(it, idxClass) }
 
         val prefs = context.getSharedPreferences("ResultReaderPrefs", Context.MODE_PRIVATE)
@@ -195,78 +246,54 @@ object PrintableExporter {
             addAll(grouped.keys.filter { it.isNotBlank() && it !in classOrder }.sorted())
         }
 
-        // ---- 出力CSVを組み立て ----
+        // ── 出力CSV組み立て ──
         val sb = StringBuilder()
 
-        // ヘッダ
         val headerOut = buildList {
             add("順位")
-            add("ラップ")
-            add("ラップ順位")
+            add("Lap")
             add("エントリーNo")
             add("名前")
-            for (s in 1..sectionCount) add("S$s")
+            for (s in 1..sectionsPerLap) add("S$s")
             add("G")
             add("G計")
             add("C計")
         }
         sb.append(headerOut.joinToString(",")).append("\n")
 
-        // データ行（1人につき Lap1 / Lap2 の2行）
+        // 各クラスごとに総合順位順で出力
         for (clazz in orderedClasses) {
             val list = grouped[clazz].orEmpty()
-                // ★ここがポイント：TotalRank 昇順で並び替え。
-                //  exportFinalPdfWithManualTieBreak() で手入力した TotalRank がそのまま効いてくる。
                 .sortedBy { cell(it, idxTotalRank).toIntOrNull() ?: Int.MAX_VALUE }
 
             for (r in list) {
-                val entryNo   = cell(r, idxEntry)
-                val name      = cell(r, idxName)
-                val totalRank = cell(r, idxTotalRank)  // ← 手入力後の最終順位
-                val totalG    = cell(r, idxTotalG)
-                val totalC    = cell(r, idxTotalC)
-                val amRank    = cell(r, idxAmRank)
-                val pmRank    = cell(r, idxPmRank)
-                val amG       = cell(r, idxAmG)
-                val pmG       = cell(r, idxPmG)
+                val entryNo = cell(r, idxEntry)
+                val name = cell(r, idxName)
+                val totalRank = cell(r, idxTotalRank)
+                val totalG = cell(r, idxTotalG)
+                val totalC = cell(r, idxTotalC)
 
-                // --- Lap1 行 ---
-                val lap1SecValues = (0 until sectionCount).map { secIdx ->
-                    cell(r, lap1SecCols[secIdx])
-                }
-                val rowLap1 = buildList {
-                    add(totalRank)          // 順位（TotalRank そのまま）
-                    add("1")               // ラップ番号
-                    add(amRank)            // ラップ順位（AM）
-                    add(entryNo)
-                    add(name)
-                    addAll(lap1SecValues)
-                    add(amG)               // このラップのG（AmG）
-                    add(totalG)            // 全体G計（TotalG）
-                    add(totalC)            // 全体C計（TotalC）
-                }
-                sb.append(rowLap1.joinToString(",")).append("\n")
+                for (lap in 0 until laps) {
+                    val secCols = lapSecCols[lap]
+                    val secVals = secCols.map { col -> cell(r, col) }
 
-                // --- Lap2 行 ---
-                val lap2SecValues = (0 until sectionCount).map { secIdx ->
-                    cell(r, lap2SecCols[secIdx])
+                    val (lapG, lapC) = calcLapGC(r, secCols)
+
+                    val rowOut = buildList {
+                        add(if (lap == 0) totalRank else "")  // 順位（TotalRankはLap1行のみ）
+                        add((lap + 1).toString())             // Lap番号
+                        add(if (lap == 0) entryNo else "")    // エントリーNo（Lap1のみ）
+                        add(if (lap == 0) name else "")       // 名前（Lap1のみ）
+                        addAll(secVals)                       // S1〜SN（それぞれのLap分）
+                        add(lapG.toString())                  // このLapのG
+                        add(if (lap == 0) totalG else "")     // G計（合計をLap1だけに表示）
+                        add(if (lap == 0) totalC else "")     // C計（合計をLap1だけに表示）
+                    }
+                    sb.append(rowOut.joinToString(",")).append("\n")
                 }
-                val rowLap2 = buildList {
-                    add("")                // 順位は上の行と同じなので空欄
-                    add("2")               // ラップ番号
-                    add(pmRank)            // ラップ順位（PM）
-                    add("")                // エントリーNo（Lap1 行のみ表示）
-                    add("")                // 名前（Lap1 行のみ表示）
-                    addAll(lap2SecValues)
-                    add(pmG)               // このラップのG（PmG）
-                    add("")                // G計（Lap1 行のみ表示）
-                    add("")                // C計（Lap1 行のみ表示）
-                }
-                sb.append(rowLap2.joinToString(",")).append("\n")
             }
         }
 
-        // ---- 保存 ----
         val fileName = "official_lap_${pattern.patternCode}_${todayName()}.csv"
         val uri = writeToDownloads(
             context,
@@ -281,6 +308,11 @@ object PrintableExporter {
             Toast.LENGTH_SHORT
         ).show()
     }
+
+
+
+
+
 
 
 
