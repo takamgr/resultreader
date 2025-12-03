@@ -1785,6 +1785,7 @@ class CameraActivity : AppCompatActivity() {
                     val roiOffsetX = 78// 最終微調整（左右）
                     val roiOffsetY = 30       // 最終微調整（上下）
 
+
                     val rawScoreBitmap = Bitmap.createBitmap(
                         fullImage,
                         (bx + roiOffsetX).coerceIn(0, fullImage.width - bw),
