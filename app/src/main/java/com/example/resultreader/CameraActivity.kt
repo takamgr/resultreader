@@ -1769,20 +1769,22 @@ class CameraActivity : AppCompatActivity() {
                         currentRowClass = null
                     }
 
-                    val scoreX = 570
-                    val scoreY = 1030
-                    val scoreWidth = 990
-                    val scoreHeight = 400
+                    val scoreX = 570         // 基準レイアウト上の X（左）
+                    val scoreY = 1030        // 基準レイアウト上の Y（上）
+                    val scoreWidth = 990     // 基準レイアウト上の 幅
+                    val scoreHeight = 400    // 基準レイアウト上の 高さ
 
-                    val scaleX = 1.67f
-                    val scaleY = 2.20f
-                    val bx = (scoreX * scaleX).toInt() - 540
-                    val by = (scoreY * scaleY).toInt() - 1160
-                    val bw = (scoreWidth * scaleX).toInt() + 380
-                    val bh = (scoreHeight * scaleY).toInt() - 70
+                    val scaleX = 1.62f       // fullImage への拡大率（幅方向）
+                    val scaleY = 2.20f       // fullImage への拡大率（高さ方向）
 
-                    val roiOffsetX = 25
-                    val roiOffsetY = 50
+                    val bx = (scoreX * scaleX).toInt() - 540   // 切り出し左端（大調整）
+                    val by = (scoreY * scaleY).toInt() - 1160  // 切り出し上端（大調整）
+                    val bw = (scoreWidth * scaleX).toInt() + 380  // 切り出し幅（大調整）
+                    val bh = (scoreHeight * scaleY).toInt() - 70  // 切り出し高さ（大調整）
+
+                    val roiOffsetX = 78// 最終微調整（左右）
+                    val roiOffsetY = 30       // 最終微調整（上下）
+
                     val rawScoreBitmap = Bitmap.createBitmap(
                         fullImage,
                         (bx + roiOffsetX).coerceIn(0, fullImage.width - bw),
