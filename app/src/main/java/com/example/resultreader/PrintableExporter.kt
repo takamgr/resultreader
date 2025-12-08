@@ -86,6 +86,14 @@ object PrintableExporter {
 // ・G は LapごとのG（減点）
 // ・G計 / C計 は合計のみを Lap1 行に表示（Lap2以降は空欄）
 // ─────────────────────────────
+    // ─────────────────────────────
+// Noluba用 公式ラップCSV
+// 4×2 / 5×2 / 4×3(=8セク3ラップ) 対応
+// 見出し：順位 / エントリーNo / 名前 / Lap / S1.. / G / G計 / C計
+// ・順位は TotalRank（手入力済みの最終順位）
+// ・G は LapごとのG（減点）
+// ・G計 / C計 は合計のみを Lap1 行に表示（Lap2以降は空欄）
+// ─────────────────────────────
     fun exportOfficialLapCsv(context: Context, pattern: TournamentPattern) {
 
         // 今日のRR CSVを読む
@@ -249,11 +257,12 @@ object PrintableExporter {
         // ── 出力CSV組み立て ──
         val sb = StringBuilder()
 
+        // 列順：順位 → エントリーNo → 名前 → Lap → S1.. → G → G計 → C計
         val headerOut = buildList {
             add("順位")
-            add("Lap")
             add("エントリーNo")
             add("名前")
+            add("Lap")
             for (s in 1..sectionsPerLap) add("S$s")
             add("G")
             add("G計")
@@ -277,17 +286,17 @@ object PrintableExporter {
                     val secCols = lapSecCols[lap]
                     val secVals = secCols.map { col -> cell(r, col) }
 
-                    val (lapG, lapC) = calcLapGC(r, secCols)
+                    val (lapG, _) = calcLapGC(r, secCols)
 
                     val rowOut = buildList {
-                        add(if (lap == 0) totalRank else "")  // 順位（TotalRankはLap1行のみ）
-                        add((lap + 1).toString())             // Lap番号
-                        add(if (lap == 0) entryNo else "")    // エントリーNo（Lap1のみ）
+                        add(if (lap == 0) totalRank else "")  // 順位（Lap1のみ）
+                        add(entryNo)                          // ★ エントリーNo：全Lapに入れる
                         add(if (lap == 0) name else "")       // 名前（Lap1のみ）
-                        addAll(secVals)                       // S1〜SN（それぞれのLap分）
+                        add((lap + 1).toString())             // Lap番号
+                        addAll(secVals)                       // S1〜SN
                         add(lapG.toString())                  // このLapのG
-                        add(if (lap == 0) totalG else "")     // G計（合計をLap1だけに表示）
-                        add(if (lap == 0) totalC else "")     // C計（合計をLap1だけに表示）
+                        add(if (lap == 0) totalG else "")     // G計（Lap1のみ）
+                        add(if (lap == 0) totalC else "")     // C計（Lap1のみ）
                     }
                     sb.append(rowOut.joinToString(",")).append("\n")
                 }
@@ -308,6 +317,8 @@ object PrintableExporter {
             Toast.LENGTH_SHORT
         ).show()
     }
+
+
 
 
 

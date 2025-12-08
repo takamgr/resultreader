@@ -116,8 +116,7 @@ class CameraActivity : AppCompatActivity() {
     // 現在画面に表示されているエントリのクラス（UIで上書き可能）
     private var currentRowClass: String? = null
     // 判定音の再生抑止用タイムスタンプ（ミリ秒）
-    private var lastJudgePlayTime: Long = 0L
-    // SoundPool ベースの効果音（短い音向け）
+
     private var judgeSoundPool: android.media.SoundPool? = null
     private var judgeSoundOkId: Int = 0
     private var judgeSoundCheckId: Int = 0
@@ -219,17 +218,32 @@ class CameraActivity : AppCompatActivity() {
          }
      }
 
-    // 再生中フラグ（重複再生防止）
+    // 再生中フラグ（重複再生防止）＋最後に鳴らした時間
     private var isPlayingJudge: Boolean = false
+    private var lastJudgePlayTime: Long = 0L
 
     // ★ 判定音を鳴らす（true = 正解, false = 要確認）
     private fun playJudgeSound(isOk: Boolean) {
         val resId = if (isOk) R.raw.judge_ok else R.raw.judge_check
 
         try {
+            val now = android.os.SystemClock.elapsedRealtime()
+
+            // 🔥 すでに再生中なら、連続呼び出しをまとめて1回にする
+            if (isPlayingJudge && now - lastJudgePlayTime < 400L) {
+                Log.d("JUDGE_SOUND", "skip duplicate play isOk=$isOk")
+                return
+            }
+
+            // このタイミングを記録しておく（デバッグ用にも使える）
+            lastJudgePlayTime = now
+            isPlayingJudge = true
+            lastJudgeState = isOk
+
             val mp = android.media.MediaPlayer.create(this, resId)
             if (mp == null) {
                 Log.e("JUDGE_SOUND", "MediaPlayer.create() returned null for res=$resId")
+                isPlayingJudge = false
                 return
             }
 
@@ -237,6 +251,7 @@ class CameraActivity : AppCompatActivity() {
                 try {
                     it.release()
                 } catch (_: Exception) { }
+                isPlayingJudge = false
                 Log.d("JUDGE_SOUND", "completed res=$resId isOk=$isOk")
             }
 
@@ -244,18 +259,24 @@ class CameraActivity : AppCompatActivity() {
                 try {
                     player.release()
                 } catch (_: Exception) { }
+                isPlayingJudge = false
                 Log.e("JUDGE_SOUND", "error what=$what extra=$extra for res=$resId")
                 true
             }
 
             mp.start()
             Log.d("JUDGE_SOUND", "start play res=$resId isOk=$isOk")
+
         } catch (e: Exception) {
+            isPlayingJudge = false
             Log.e("JUDGE_SOUND", "play error for res=$resId", e)
         }
     }
 
-    private fun recalculateScore() {
+
+
+    // ★ 引数 playSound 追加：必要なときだけ音を鳴らす
+    private fun recalculateScore(playSound: Boolean = true) {
         var totalScore = 0
         var cleanCount = 0
         var hasError = false
@@ -300,20 +321,30 @@ class CameraActivity : AppCompatActivity() {
             cleanText.text = "C:　-"
             confirmButton.visibility = View.GONE
             guideOverlay.setDetected("yellow")
-            Toast.makeText(this, "⚠️ スコアに空欄やエラー（99など）が含まれています", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                this,
+                "⚠️ スコアに空欄やエラー（99など）が含まれています",
+                Toast.LENGTH_SHORT
+            ).show()
 
-            // ★ 要確認音を1回だけ鳴らす
-            playJudgeSound(false)
+            // ★ 要確認音を1回だけ鳴らす（必要なときだけ）
+            if (playSound) {
+                playJudgeSound(false)
+            }
         } else {
             pointText.text = "G:　$totalScore"
             cleanText.text = "C:　$cleanCount"
             confirmButton.visibility = View.VISIBLE
             guideOverlay.setDetected("green")
 
-            // ★ 正解音を1回だけ鳴らす
-            playJudgeSound(true)
+            // ★ 正解音を1回だけ鳴らす（必要なときだけ）
+            if (playSound) {
+                playJudgeSound(true)
+            }
         }
     }
+
+
 
 
 
@@ -343,8 +374,9 @@ class CameraActivity : AppCompatActivity() {
                 "-" -> targetLabel.setBackgroundResource(R.drawable.bg_score_blank)
             }
 
-            // 🔥ここでスコア再計算を明示的に実行！
-            recalculateScore()
+            // ✅ OCR反映後に封鎖チェック（Phase1）※ここでは音は鳴らさない
+            recalculateScore(playSound = false)
+
 
             Toast.makeText(this, "※ 手入力でスコアを修正しました", Toast.LENGTH_SHORT).show()
         }
@@ -687,51 +719,92 @@ class CameraActivity : AppCompatActivity() {
             dialog.setOnShowListener {
                 dialog.listView.setOnItemLongClickListener { _, _, position, _ ->
                     val fileTarget = csvFiles[position]
-                    val items = arrayOf("開く", "ダウンロードへコピー", "共有", "削除", "キャンセル")
+                    val items = arrayOf(
+                        "開く",
+                        "ダウンロードへコピー",
+                        "共有",
+                        "削除",
+                        "CSVを保存（公式ラップ形式）",
+                        "PDFを保存（Canvas）",
+                        "キャンセル"
+                    )
 
                     AlertDialog.Builder(this)
                         .setTitle(fileTarget.name)
                         .setItems(items) { d, which ->
-                             when (which) {
-                                 0 -> { // 開く
-                                     openCsvFile(fileTarget)
-                                 }
-                                 1 -> { // ダウンロードへコピー
-                                     val uri = copyToDownloads(fileTarget)
-                                     if (uri != null) {
-                                         Toast.makeText(this, "📂 ダウンロードにコピーしました\n${fileTarget.name}", Toast.LENGTH_LONG).show()
-                                     } else {
-                                         Toast.makeText(this, "コピーに失敗しました", Toast.LENGTH_SHORT).show()
-                                     }
-                                 }
-                                 2 -> { // 共有
-                                     shareCsvFile(fileTarget)
-                                 }
-                                 3 -> { // 削除（既存仕様を維持）
-                                     AlertDialog.Builder(this)
-                                         .setTitle("削除確認")
-                                         .setMessage("「${fileTarget.name}」を削除しますか？")
-                                         .setPositiveButton("削除") { _, _ ->
-                                             if (fileTarget.delete()) {
-                                                 Toast.makeText(this, "削除しました", Toast.LENGTH_SHORT).show()
-                                                 // 一覧更新
-                                                 findViewById<ImageButton>(R.id.openCsvImageButton).performClick()
-                                             } else {
-                                                 Toast.makeText(this, "削除に失敗しました", Toast.LENGTH_SHORT).show()
-                                             }
-                                             dialog.dismiss()
-                                         }
-                                         .setNegativeButton("キャンセル", null)
-                                         .show()
-                                 }
-                                 else -> d.dismiss()
-                             }
-                         }
+                            when (which) {
+                                0 -> { // 開く
+                                    openCsvFile(fileTarget)
+                                }
+                                1 -> { // ダウンロードへコピー
+                                    val uri = copyToDownloads(fileTarget)
+                                    if (uri != null) {
+                                        Toast.makeText(
+                                            this,
+                                            "📂 ダウンロードにコピーしました\n${fileTarget.name}",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    } else {
+                                        Toast.makeText(this, "コピーに失敗しました", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                                2 -> { // 共有
+                                    shareCsvFile(fileTarget)
+                                }
+                                3 -> { // 削除（既存の処理そのまま）
+                                    AlertDialog.Builder(this)
+                                        .setTitle("削除確認")
+                                        .setMessage("「${fileTarget.name}」を削除しますか？")
+                                        .setPositiveButton("削除") { _, _ ->
+                                            if (fileTarget.delete()) {
+                                                Toast.makeText(this, "削除しました", Toast.LENGTH_SHORT).show()
+                                                // 一覧更新
+                                                findViewById<ImageButton>(R.id.openCsvImageButton).performClick()
+                                            } else {
+                                                Toast.makeText(this, "削除に失敗しました", Toast.LENGTH_SHORT).show()
+                                            }
+                                            dialog.dismiss()
+                                        }
+                                        .setNegativeButton("キャンセル", null)
+                                        .show()
+                                }
+                                4 -> { // CSVを保存（公式ラップ形式）
+                                    val pattern = inferPatternFromFileName(fileTarget) ?: selectedPattern
+                                    runExporterUsingCsvAsToday(fileTarget, pattern) {
+                                        PrintableExporter.exportOfficialLapCsv(
+                                            context = this,
+                                            pattern = pattern
+                                        )
+                                    }
+                                }
+                                5 -> { // PDFを保存（Canvas）
+                                    val pattern = inferPatternFromFileName(fileTarget) ?: selectedPattern
+                                    runExporterUsingCsvAsToday(fileTarget, pattern) {
+                                        val mode =
+                                            if (currentSession == "AM")
+                                                PrintableExporter.PdfSessionMode.AM_PROVISIONAL
+                                            else
+                                                PrintableExporter.PdfSessionMode.FINAL
+
+                                        PrintableExporter.exportPrintablePdfStyledSplitByClass(
+                                            context = this,
+                                            pattern = pattern,
+                                            rowsPerPage = 20,
+                                            sessionMode = mode
+                                        )
+                                    }
+                                }
+                                6 -> {
+                                    d.dismiss() // キャンセル
+                                }
+                            }
+                        }
                         .show()
 
                     true
                 }
             }
+
 
             dialog.show()
         }
@@ -770,21 +843,16 @@ class CameraActivity : AppCompatActivity() {
                 isCameraReady = true
                 isManualCameraControl = false
 
+                // カメラ起動が安定してから OCR 開始（1回だけ）
                 Handler(Looper.getMainLooper()).postDelayed({
                     startOcrCapture()
                 }, 300)
-                return@setOnClickListener
+            } else {
+                // 2回目以降も OCR は常に startOcrCapture() 経由で1回だけ
+                startOcrCapture()
             }
-
-            startOcrCapture()
-
-
-            resultText.text = "認識中…"
-            guideOverlay.setDetected("red")
-            confirmButton.visibility = View.GONE
-            scorePreview.visibility = View.GONE
-            captureAndAnalyzeMultiple()
         }
+
 
         // 保存処理
         confirmButton.setOnClickListener {
@@ -892,12 +960,11 @@ class CameraActivity : AppCompatActivity() {
             }
         }
 
-        // --- 追記: 右上のCSVボタン候補を探索し、長押しで出力メニューを表示 ---
         // CSV / PDF 出力メニュー（長押し）
         fun setupExportLongPress(anchor: View) {
             val popup = PopupMenu(this, anchor)
 
-            // シンプルに 2 メニューだけに整理
+            // メニュー項目
             popup.menu.add(0, 1, 1, "CSVを保存（公式ラップ形式）")
             popup.menu.add(0, 2, 2, "PDFを保存（Canvas）")
 
@@ -905,26 +972,42 @@ class CameraActivity : AppCompatActivity() {
                 when (item.itemId) {
                     // ★ Noluba 用：公式ラップ形式 CSV 出力
                     1 -> {
-                        PrintableExporter.exportOfficialLapCsv(
-                            context = this,
-                            pattern = selectedPattern
-                        )
+                        val pattern = selectedPattern ?: run {
+                            Toast.makeText(this, "大会設定が未選択です", Toast.LENGTH_SHORT).show()
+                            return@setOnMenuItemClickListener true
+                        }
+
+                        // 未集計がある場合は確認ダイアログ →「はい」で出力
+                        confirmExportIfMissingExists {
+                            PrintableExporter.exportOfficialLapCsv(
+                                context = this,
+                                pattern = pattern
+                            )
+                        }
                         true
                     }
 
                     // PDF 出力
                     2 -> {
-                        if (currentSession == "AM") {
-                            // 午前中：暫定PDF（A順だけ 1,1,3… 表示）
-                            PrintableExporter.exportPrintablePdfStyledSplitByClass(
-                                context = this,
-                                pattern = selectedPattern,
-                                rowsPerPage = 20,
-                                sessionMode = PrintableExporter.PdfSessionMode.AM_PROVISIONAL
-                            )
-                        } else {
-                            // PM / 総合：完全同点があれば手入力で TotalRank を確定してから FINAL PDF
-                            exportFinalPdfWithManualTieBreak()
+                        val pattern = selectedPattern ?: run {
+                            Toast.makeText(this, "大会設定が未選択です", Toast.LENGTH_SHORT).show()
+                            return@setOnMenuItemClickListener true
+                        }
+
+                        // 未集計がある場合は確認ダイアログ →「はい」で出力
+                        confirmExportIfMissingExists {
+                            if (currentSession == "AM") {
+                                // 午前中：暫定PDF（A順だけ 1,1,3… 表示）
+                                PrintableExporter.exportPrintablePdfStyledSplitByClass(
+                                    context = this,
+                                    pattern = pattern,
+                                    rowsPerPage = 20,
+                                    sessionMode = PrintableExporter.PdfSessionMode.AM_PROVISIONAL
+                                )
+                            } else {
+                                // PM / 総合：完全同点チェック付き FINAL PDF
+                                exportFinalPdfWithManualTieBreak()
+                            }
                         }
                         true
                     }
@@ -935,6 +1018,7 @@ class CameraActivity : AppCompatActivity() {
 
             popup.show()
         }
+
 
 
 
@@ -1636,7 +1720,6 @@ class CameraActivity : AppCompatActivity() {
     }
 
 
-
     private fun captureAndAnalyzeMultiple() {
         val currentImageCapture = imageCapture ?: return
         val results = mutableListOf<ScoreAnalyzer.ScoreResult>()
@@ -1647,9 +1730,20 @@ class CameraActivity : AppCompatActivity() {
                 val majority = grouped.maxByOrNull { it.value.size }?.value?.firstOrNull()
 
                 if (majority != null) {
+                    // 多数決でスコアが確定したので UI 更新
                     updateScoreUi(majority)
+
+                    // ★ G/C・99・空欄チェックも含めて最終判定しつつ音を鳴らす
+                    //    - エラーがあれば NG 音
+                    //    - 問題なければ OK 音
+                    recalculateScore(playSound = true)
+
                     guideOverlay.setDetected("green")
+                    // recalculateScore 内でエラーなら confirmButton が非表示になるので、
+                    // ここでは一旦表示だけしておき、最終状態は recalculateScore に任せる
                     confirmButton.visibility = View.VISIBLE
+
+                    // ※ ここでは playJudgeSound(true) を直接呼ばない
                 } else {
                     guideOverlay.setDetected("red")
                     Toast.makeText(
@@ -1657,10 +1751,11 @@ class CameraActivity : AppCompatActivity() {
                         "⚠️ 判定一致せず：手動確認して修正してください",
                         Toast.LENGTH_LONG
                     ).show()
-                    // エラー時はチェック音を鳴らす
+                    // ★ 不一致は無条件で NG 音
                     playJudgeSound(false)
                     confirmButton.visibility = View.VISIBLE
                 }
+
 
                 // 🔥 自動モード時のみカメラ完全停止！
                 if (!isManualCameraControl) {
@@ -1683,8 +1778,6 @@ class CameraActivity : AppCompatActivity() {
 
                     Log.d("CAMERA", "📴 OCR完了後にカメラ自動停止")
                 }
-
-
 
                 return
             }
@@ -1714,16 +1807,21 @@ class CameraActivity : AppCompatActivity() {
                     }
 
                     override fun onError(e: ImageCaptureException) {
-                        Toast.makeText(applicationContext, "撮影エラー", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            applicationContext,
+                            "撮影エラー",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }
                 }
             )
         }
 
         takeNext(0)
+    }
 
 
-}
+
 
 
 
@@ -1858,7 +1956,8 @@ class CameraActivity : AppCompatActivity() {
         }
 
         // ✅ OCR反映後に封鎖チェック（Phase1）
-        recalculateScore()
+        // ※ここでは音を鳴らさず、G/Cとボタン制御だけ行う
+        recalculateScore(playSound = false)
     }
 
 
@@ -2294,6 +2393,10 @@ class CameraActivity : AppCompatActivity() {
 
                 if (majority != null) {
                     updateScoreUi(majority)
+
+                    // ★ こちらも G/C・エラー込みで最終判定しつつ音を鳴らす
+                    recalculateScore(playSound = true)
+
                     guideOverlay.setDetected("green")
                     confirmButton.visibility = View.VISIBLE
                 } else {
@@ -2303,6 +2406,8 @@ class CameraActivity : AppCompatActivity() {
                     playJudgeSound(false)
                     confirmButton.visibility = View.VISIBLE
                 }
+
+
 
                 // 自動モード時のみ停止（既存と同等）
                 if (!isManualCameraControl) {
@@ -2434,31 +2539,30 @@ class CameraActivity : AppCompatActivity() {
                 return
             }
 
-            // ★ 1行目のBOMを除去してヘッダーを作る
             val allLines = csvFile.readLines(Charsets.UTF_8)
             if (allLines.isEmpty()) {
                 Toast.makeText(this, "CSVが空です", Toast.LENGTH_SHORT).show()
                 return
             }
 
-            val header = allLines.first()
-                .split(",")
-                .map { it.replace("\uFEFF", "").trim() }
+            val headerRaw = allLines.first().split(",").map { it.replace("\uFEFF", "").trim() }
             val rows = allLines.drop(1).map { it.split(",") }
 
-            val entryNoIdx = header.indexOf("EntryNo")
-            val inputIdx   = header.indexOf("入力")
-            val amGIdx     = header.indexOf("AmG")
-            val amCIdx     = header.indexOf("AmC")
+            val entryNoIdx = headerRaw.indexOf("EntryNo")
+            val amGIdx     = headerRaw.indexOf("AmG")
+            val amCIdx     = headerRaw.indexOf("AmC")
+            val inputIdx   = headerRaw.indexOf("入力")
 
-            if (entryNoIdx == -1 || inputIdx == -1 || amGIdx == -1 || amCIdx == -1) {
-                Toast.makeText(this, "ヘッダー解析エラー(AM)", Toast.LENGTH_LONG).show()
+            if (entryNoIdx == -1 || amGIdx == -1 || amCIdx == -1 || inputIdx == -1) {
+                Toast.makeText(this, "ヘッダー解析エラー(AMチェック)", Toast.LENGTH_LONG).show()
                 return
             }
 
-            // ■ AM完全同点チェック（DNS / DNF 除外, v1.7 正式ルール）
+            val entryMap = CsvUtils.loadEntryMapFromCsv(this)
+
+            // ★ AM完全同点チェック（元のロジックそのまま）
             val hasPerfectTie = hasPerfectTieV17(
-                header = header,
+                header = headerRaw,
                 rows = rows,
                 inputIdx = inputIdx,
                 gIdx = amGIdx,
@@ -2475,10 +2579,17 @@ class CameraActivity : AppCompatActivity() {
             // ■ 未読み取り（AM）チェック（EntryList 基準）
             val missing = entryMap.keys.filter { entryNo ->
                 val row = rows.find { it.getOrNull(entryNoIdx)?.toIntOrNull() == entryNo }
-                row == null ||
-                        (row.getOrNull(amGIdx).isNullOrBlank()
-                                && row.getOrNull(amCIdx).isNullOrBlank()
-                                && row.getOrNull(inputIdx) != "DNS")
+
+                if (row == null) {
+                    true
+                } else {
+                    val amGBlank = row.getOrNull(amGIdx).isNullOrBlank()
+                    val amCBlank = row.getOrNull(amCIdx).isNullOrBlank()
+                    val inputLabel = row.getOrNull(inputIdx).orEmpty()
+                    val isDnsOrDnf = (inputLabel == "DNS" || inputLabel.contains("DNF"))
+
+                    amGBlank && amCBlank && !isDnsOrDnf
+                }
             }
 
             if (missing.isNotEmpty()) {
@@ -2495,6 +2606,7 @@ class CameraActivity : AppCompatActivity() {
             Toast.makeText(this, "AMチェックでエラー: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
+
 
 
 
@@ -2520,6 +2632,7 @@ class CameraActivity : AppCompatActivity() {
             val header = allLines.first()
                 .split(",")
                 .map { it.replace("\uFEFF", "").trim() }
+
             val rows = allLines.drop(1).map { it.split(",") }
 
             val entryNoIdx = header.indexOf("EntryNo")
@@ -2536,19 +2649,26 @@ class CameraActivity : AppCompatActivity() {
                 return
             }
 
+            val entryMap = CsvUtils.loadEntryMapFromCsv(this)
+
             val missing = entryMap.keys.filter { entryNo ->
                 val row = rows.find { it.getOrNull(entryNoIdx)?.toIntOrNull() == entryNo }
 
-                if (session == "AM") {
-                    row == null ||
-                            (row.getOrNull(amGIdx).isNullOrBlank()
-                                    && row.getOrNull(amCIdx).isNullOrBlank()
-                                    && row.getOrNull(inputIdx) != "DNS")
+                if (row == null) {
+                    true
                 } else {
-                    row == null ||
-                            (row.getOrNull(pmGIdx).isNullOrBlank()
-                                    && row.getOrNull(pmCIdx).isNullOrBlank()
-                                    && row.getOrNull(inputIdx) != "DNS")
+                    val inputLabel = row.getOrNull(inputIdx).orEmpty()
+                    val isDnsOrDnf = (inputLabel == "DNS" || inputLabel.contains("DNF"))
+
+                    if (session == "AM") {
+                        val amGBlank = row.getOrNull(amGIdx).isNullOrBlank()
+                        val amCBlank = row.getOrNull(amCIdx).isNullOrBlank()
+                        amGBlank && amCBlank && !isDnsOrDnf
+                    } else {
+                        val pmGBlank = row.getOrNull(pmGIdx).isNullOrBlank()
+                        val pmCBlank = row.getOrNull(pmCIdx).isNullOrBlank()
+                        pmGBlank && pmCBlank && !isDnsOrDnf
+                    }
                 }
             }
 
@@ -2566,10 +2686,92 @@ class CameraActivity : AppCompatActivity() {
             Toast.makeText(this, "未集計チェックでエラー: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
+    // AM / PM の未集計があるかだけを判定（ダイアログは出さない）
+    private fun hasMissingEntriesForSession(session: String): Boolean {
+        return try {
+            val pattern = selectedPattern ?: return false
+            val today = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
+            val fileName = "result_${pattern.patternCode}_$today.csv"
+            val csvFile = File(getExternalFilesDir("ResultReader"), fileName)
 
-    // ------------------------------------------------------------
-// 最終チェック（Total同点＋PM未集計）
-// ------------------------------------------------------------
+            if (!csvFile.exists()) return false
+
+            val allLines = csvFile.readLines(Charsets.UTF_8)
+            if (allLines.isEmpty()) return false
+
+            val header = allLines.first()
+                .split(",")
+                .map { it.replace("\uFEFF", "").trim() }
+            val rows = allLines.drop(1).map { it.split(",") }
+
+            val entryNoIdx = header.indexOf("EntryNo")
+            val inputIdx   = header.indexOf("入力")
+            val amGIdx     = header.indexOf("AmG")
+            val amCIdx     = header.indexOf("AmC")
+            val pmGIdx     = header.indexOf("PmG")
+            val pmCIdx     = header.indexOf("PmC")
+
+            if (entryNoIdx == -1 || inputIdx == -1 ||
+                amGIdx == -1 || amCIdx == -1 || pmGIdx == -1 || pmCIdx == -1) {
+                return false
+            }
+
+            val entryMap = CsvUtils.loadEntryMapFromCsv(this)
+
+            val missing = entryMap.keys.filter { entryNo ->
+                val row = rows.find { it.getOrNull(entryNoIdx)?.toIntOrNull() == entryNo }
+
+                if (session == "AM") {
+                    row == null ||
+                            (row.getOrNull(amGIdx).isNullOrBlank()
+                                    && row.getOrNull(amCIdx).isNullOrBlank()
+                                    && row.getOrNull(inputIdx) != "DNS")
+                } else {
+                    row == null ||
+                            (row.getOrNull(pmGIdx).isNullOrBlank()
+                                    && row.getOrNull(pmCIdx).isNullOrBlank()
+                                    && row.getOrNull(inputIdx) != "DNS")
+                }
+            }
+
+            missing.isNotEmpty()
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+
+    // 未集計がある場合は「はい／いいえ」で確認してから出力を実行
+    private fun confirmExportIfMissingExists(onConfirmed: () -> Unit) {
+        val hasAmMissing = hasMissingEntriesForSession("AM")
+        val hasPmMissing = hasMissingEntriesForSession("PM")
+
+        if (!hasAmMissing && !hasPmMissing) {
+            // どこにも未集計がなければそのまま実行
+            onConfirmed()
+            return
+        }
+
+        val msg = when {
+            hasAmMissing && hasPmMissing ->
+                "AM / PM に未集計エントリーがあります。出力してよろしいですか？"
+            hasAmMissing ->
+                "AMに未集計エントリーがあります。出力してよろしいですか？"
+            else ->
+                "PMに未集計エントリーがあります。出力してよろしいですか？"
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("未集計エントリーの確認")
+            .setMessage(msg)
+            .setPositiveButton("はい") { _, _ ->
+                onConfirmed()
+            }
+            .setNegativeButton("いいえ", null)
+            .show()
+    }
+
+
     // ------------------------------------------------------------
 // 最終チェック（Total完全同点＋PM未集計）  ※完全同点判定は v1.7 ルール準拠
 // ------------------------------------------------------------
@@ -2627,10 +2829,17 @@ class CameraActivity : AppCompatActivity() {
             // ■ PM未集計
             val missing = entryMap.keys.filter { entryNo ->
                 val row = rows.find { it.getOrNull(entryNoIdx)?.toIntOrNull() == entryNo }
-                row == null ||
-                        (row.getOrNull(pmGIdx).isNullOrBlank()
-                                && row.getOrNull(pmCIdx).isNullOrBlank()
-                                && row.getOrNull(inputIdx) != "DNS")
+
+                if (row == null) {
+                    true
+                } else {
+                    val pmGBlank   = row.getOrNull(pmGIdx).isNullOrBlank()
+                    val pmCBlank   = row.getOrNull(pmCIdx).isNullOrBlank()
+                    val inputLabel = row.getOrNull(inputIdx).orEmpty()
+                    val isDnsOrDnf = (inputLabel == "DNS" || inputLabel.contains("DNF"))
+
+                    pmGBlank && pmCBlank && !isDnsOrDnf
+                }
             }
 
             val missingMsg =
@@ -2721,6 +2930,60 @@ class CameraActivity : AppCompatActivity() {
         // 同じ Key が2件以上あれば「完全同点あり」
         return counts.values.any { it > 1 }
     }
+    // ファイル名からパターンを推測（result_5x2_20251207.csv → "5x2" → TournamentPattern）
+    private fun inferPatternFromFileName(file: File): TournamentPattern? {
+        val name = file.nameWithoutExtension  // result_5x2_20251207
+        val parts = name.split("_")
+        if (parts.size < 3) return null
+        val patternCodeFromName = parts[1]    // 5x2 など
+
+        return when (patternCodeFromName) {
+            TournamentPattern.PATTERN_4x2.patternCode -> TournamentPattern.PATTERN_4x2
+            TournamentPattern.PATTERN_4x3.patternCode -> TournamentPattern.PATTERN_4x3
+            TournamentPattern.PATTERN_5x2.patternCode -> TournamentPattern.PATTERN_5x2
+            else -> null
+        }
+    }
+
+    /**
+     * 指定した CSV を「今日のCSV」として一時的に差し替えて、既存の Exporter を呼ぶ。
+     *
+     * - srcCsv : result_5x2_20251205.csv など、好きな日付のCSV
+     * - pattern: 4x2 / 4x3 / 5x2
+     *
+     * 中で result_{patternCode}_今日.csv にコピーしてから exporterCall() を実行。
+     * 終わったら元のファイルを戻す or 削除するので、元データは壊さない。
+     */
+    private inline fun runExporterUsingCsvAsToday(
+        srcCsv: File,
+        pattern: TournamentPattern,
+        crossinline exporterCall: () -> Unit
+    ) {
+        val dir = srcCsv.parentFile ?: return
+        val today = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
+        val todayFile = File(dir, "result_${pattern.patternCode}_$today.csv")
+
+        // もともと今日のCSVがあればバックアップ
+        val backupFile = if (todayFile.exists()) File(dir, todayFile.name + ".bak_rr") else null
+
+        try {
+            backupFile?.let { todayFile.copyTo(it, overwrite = true) }  // 今日のCSVを待避
+            srcCsv.copyTo(todayFile, overwrite = true)                  // 対象CSVを今日名でコピー
+
+            exporterCall() // ここで既存の PrintableExporter / CsvExporter をそのまま呼ぶ
+
+        } finally {
+            if (backupFile != null && backupFile.exists()) {
+                // バックアップがある＝もともと今日のCSVがあった → 元に戻す
+                backupFile.copyTo(todayFile, overwrite = true)
+                backupFile.delete()
+            } else {
+                // もともと今日のCSVが無かった → 一時ファイルを削除
+                todayFile.delete()
+            }
+        }
+    }
+
 
 
 
