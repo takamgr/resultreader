@@ -1991,6 +1991,7 @@ class CameraActivity : AppCompatActivity() {
                         val isWhiteEnough  = whiteRatio >= 0.35f
                         val isBrightEnough = avgLuma    >=35f
 
+
 // 安定判定の閾値（AEがフラフラしても通す）
                         val lumaThr  = 15f
                         val whiteThr = 0.35f
