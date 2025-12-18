@@ -1773,6 +1773,7 @@ class CameraActivity : AppCompatActivity() {
                 prepareButton.alpha = 1f
             }
 
+
             // 自動停止設計ならここで停止（あなたの方針に合わせてON/OFF）
             // stopCamera() を持ってるなら呼ぶ。無ければunbindAllだけでもOK。
             // 例：
