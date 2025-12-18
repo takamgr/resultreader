@@ -69,9 +69,14 @@ class CameraActivity : AppCompatActivity() {
     private var entryMap: Map<Int, Pair<String, String>> = emptyMap()
 
 
+    //自動発火用
+    private val autoDetector = AutoCardDetector()
+
+    // 要件の「次カード待ち」に戻すためのフラグ
+    private var autoCaptureArmed: Boolean = true
 
 
-
+    //ここまで
 
 
     private var selectedPattern: TournamentPattern = TournamentPattern.PATTERN_4x2
@@ -97,10 +102,6 @@ class CameraActivity : AppCompatActivity() {
     private lateinit var tournamentInfoText: TextView
 
 
-
-
-    private var isOcrRunning = false
-
     private var isFlashOn = false
     private var pendingSaveBitmap: Bitmap? = null
     private var imageCapture: ImageCapture? = null
@@ -110,9 +111,11 @@ class CameraActivity : AppCompatActivity() {
 
     // 手入力でEntryNoが確定済みかどうかの簡易フラグ
     private var manualEntryCommitted: Boolean = false
+
     // C案: OCRで直近にEntryNoが読めたか／画面にスコア解析結果があるか
     private var lastOcrHadEntry: Boolean = false  // 直近のOCRでEntryNoが読めたか
     private var hasScoreResult: Boolean = false   // 画面にスコア解析結果が出ているか
+
     // 現在画面に表示されているエントリのクラス（UIで上書き可能）
     private var currentRowClass: String? = null
     // 判定音の再生抑止用タイムスタンプ（ミリ秒）
@@ -121,9 +124,11 @@ class CameraActivity : AppCompatActivity() {
     private var judgeSoundOkId: Int = 0
     private var judgeSoundCheckId: Int = 0
     private var judgeSoundsLoaded: Boolean = false
+
     // 個別ロード完了フラグ（SoundPool の各サンプルがロード済みか）
     private var judgeOkLoaded: Boolean = false
     private var judgeCheckLoaded: Boolean = false
+
     // 直近に再生した判定（null=なし, true=OK, false=NG）を保持して同一状態の連続再生を抑止
     private var lastJudgeState: Boolean? = null
     private val entryListPickerLauncher =
@@ -136,33 +141,35 @@ class CameraActivity : AppCompatActivity() {
         }
 
 
-
-
-
     private fun suspendCameraAndScreen() {
-        if (isCameraSuspended || isOcrRunning) return  // ← これ！！
-        isCameraSuspended = true
-
-
-        // CameraX完全停止
-        try {
-            ProcessCameraProvider.getInstance(this).get().unbindAll()
-            camera = null
-        } catch (e: Exception) {
-            Log.e("SLEEP", "Camera停止失敗", e)
-        }
-
-        // 表示系停止＋背景黒
-        previewView.visibility = View.GONE
-        guideOverlay.visibility = View.GONE
-        findViewById<FrameLayout>(R.id.previewContainer).setBackgroundColor(Color.BLACK)
-
-        // スクリーンONフラグ外す
-        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
-        Log.d("SLEEP", "💤 スリープモード突入")
+        // 🚧 自動発火の安定化が終わるまでスリープは封印
+        // suspended=true になると発火しない事故が起きやすいので、一旦なにもしない
+        Log.d("SLEEP", "🚧 suspend disabled (auto-capture tuning phase)")
     }
 
+    private fun resumeCameraAndScreen(reason: String = "") {
+        if (!isCameraSuspended) return
+
+        isCameraSuspended = false
+
+        // 表示復帰
+        previewView.visibility = View.VISIBLE
+        guideOverlay.visibility = View.VISIBLE
+        findViewById<FrameLayout>(R.id.previewContainer).setBackgroundColor(Color.TRANSPARENT)
+
+        // スクリーンON維持
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        // CameraX再起動（止めている設計なので必須）
+        if (!isCameraReady) {
+            startCamera()
+        } else {
+            // 念のため再起動したい場合は startCamera() 呼んでもOK
+            // startCamera()
+        }
+
+        Log.d("SLEEP", "🌅 resume: $reason")
+    }
 
 
 
@@ -170,9 +177,6 @@ class CameraActivity : AppCompatActivity() {
         inactivityHandler.removeCallbacksAndMessages(null)
         inactivityHandler.postDelayed({ suspendCameraAndScreen() }, inactivityTimeout)
     }
-
-
-
 
 
     // ★ 判定音を鳴らす（true = 正解, false = 要確認）
@@ -191,7 +195,8 @@ class CameraActivity : AppCompatActivity() {
                     .build()
             } else {
                 @Suppress("DEPRECATION")
-                judgeSoundPool = android.media.SoundPool(2, android.media.AudioManager.STREAM_MUSIC, 0)
+                judgeSoundPool =
+                    android.media.SoundPool(2, android.media.AudioManager.STREAM_MUSIC, 0)
             }
 
             // リソースは .wav でも .mp3 でも R.raw.* で参照できる
@@ -204,19 +209,20 @@ class CameraActivity : AppCompatActivity() {
                 Log.d("JUDGE_SOUND", "onLoadComplete id=$sampleId status=$status")
                 try {
                     if (sampleId == judgeSoundOkId && judgeSoundOkId != 0) judgeOkLoaded = true
-                    if (sampleId == judgeSoundCheckId && judgeSoundCheckId != 0) judgeCheckLoaded = true
+                    if (sampleId == judgeSoundCheckId && judgeSoundCheckId != 0) judgeCheckLoaded =
+                        true
                     // judgeSoundsLoaded はどちらかがロード済みなら true とする（個別判定で再生可否を判断する）
                     judgeSoundsLoaded = judgeOkLoaded || judgeCheckLoaded
                 } catch (e: Exception) {
                     Log.w("JUDGE_SOUND", "onLoadComplete handling failed", e)
                 }
             }
-         } catch (e: Exception) {
-             Log.e("JUDGE_SOUND", "SoundPool init failed", e)
-             judgeSoundPool = null
-             judgeSoundsLoaded = false
-         }
-     }
+        } catch (e: Exception) {
+            Log.e("JUDGE_SOUND", "SoundPool init failed", e)
+            judgeSoundPool = null
+            judgeSoundsLoaded = false
+        }
+    }
 
     // 再生中フラグ（重複再生防止）＋最後に鳴らした時間
     private var isPlayingJudge: Boolean = false
@@ -250,7 +256,8 @@ class CameraActivity : AppCompatActivity() {
             mp.setOnCompletionListener {
                 try {
                     it.release()
-                } catch (_: Exception) { }
+                } catch (_: Exception) {
+                }
                 isPlayingJudge = false
                 Log.d("JUDGE_SOUND", "completed res=$resId isOk=$isOk")
             }
@@ -258,7 +265,8 @@ class CameraActivity : AppCompatActivity() {
             mp.setOnErrorListener { player, what, extra ->
                 try {
                     player.release()
-                } catch (_: Exception) { }
+                } catch (_: Exception) {
+                }
                 isPlayingJudge = false
                 Log.e("JUDGE_SOUND", "error what=$what extra=$extra for res=$resId")
                 true
@@ -272,7 +280,6 @@ class CameraActivity : AppCompatActivity() {
             Log.e("JUDGE_SOUND", "play error for res=$resId", e)
         }
     }
-
 
 
     // ★ 引数 playSound 追加：必要なときだけ音を鳴らす
@@ -345,10 +352,6 @@ class CameraActivity : AppCompatActivity() {
     }
 
 
-
-
-
-
     // 画像保存を無効化（今後は保存しない）
     private fun saveImage(bitmap: Bitmap) {
         // スコア画像の保存は行いません（デバッグ用途の保存機能は廃止）
@@ -383,13 +386,15 @@ class CameraActivity : AppCompatActivity() {
         builder.setNegativeButton("キャンセル", null)
         builder.show()
     }
+
     private fun copyCsvToAppStorage(uri: Uri) {
         val prefs = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
         val isDebug = BuildConfig.IS_DEBUG
         val alreadyLoaded = prefs.getBoolean("entrylist_loaded_once", false)
 
         if (alreadyLoaded && !isDebug) {
-            Toast.makeText(this, "⚠️ entrylist.csv はすでに読み込まれています", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "⚠️ entrylist.csv はすでに読み込まれています", Toast.LENGTH_SHORT)
+                .show()
             return
         }
 
@@ -444,7 +449,11 @@ class CameraActivity : AppCompatActivity() {
                         .putBoolean("entrylist_loaded_once", true)
                         .apply()
                     updateTournamentInfoText()
-                    Toast.makeText(this, "✅ エントリーリスト読み込み完了\n$toastText", Toast.LENGTH_LONG).show()
+                    Toast.makeText(
+                        this,
+                        "✅ エントリーリスト読み込み完了\n$toastText",
+                        Toast.LENGTH_LONG
+                    ).show()
 
                     // 読み込み完了後にボタンを非表示に！
                     findViewById<ImageButton>(R.id.entryListImportButton).visibility = View.GONE
@@ -457,15 +466,13 @@ class CameraActivity : AppCompatActivity() {
                 .putBoolean("entrylist_loaded_once", true)
                 .apply()
             updateTournamentInfoText()
-            Toast.makeText(this, "✅ エントリーリスト読み込み完了\n$toastText", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "✅ エントリーリスト読み込み完了\n$toastText", Toast.LENGTH_LONG)
+                .show()
 
             // 読み込み完了後にボタンを非表示に！
             findViewById<ImageButton>(R.id.entryListImportButton).visibility = View.GONE
         }
     }
-
-
-
 
 
     private fun updateTournamentInfoText() {
@@ -481,16 +488,7 @@ class CameraActivity : AppCompatActivity() {
         prefs.edit().putBoolean("entrylist_loaded_once", true).apply()
 
 
-
     }
-
-
-
-
-
-
-
-
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -577,9 +575,19 @@ class CameraActivity : AppCompatActivity() {
         previewView = findViewById(R.id.previewView)
 
         prepareButton.setOnLongClickListener {
-            confirmButton.performLongClick()
+            // 自動モードON/OFF切替
+            autoCaptureArmed = !autoCaptureArmed
+
+            if (autoCaptureArmed) {
+                Toast.makeText(this, "🤖 自動モードON（カード待ち）", Toast.LENGTH_SHORT).show()
+                autoDetector.resetForNextCard("auto ON")
+                if (!isCameraReady) startCamera()
+            } else {
+                Toast.makeText(this, "🧑 自動モードOFF", Toast.LENGTH_SHORT).show()
+            }
             true
         }
+
 
         // 追加: 掲示用出力ボタンのクリックリスナー（R生成前の環境でも安全に動作するよう動的取得）
         val exportS1ButtonId = resources.getIdentifier("exportS1Button", "id", packageName)
@@ -627,7 +635,7 @@ class CameraActivity : AppCompatActivity() {
             }
         }
 
-             val idBtnExportPdf = resources.getIdentifier("btnExportPdf", "id", packageName)
+        val idBtnExportPdf = resources.getIdentifier("btnExportPdf", "id", packageName)
         if (idBtnExportPdf != 0) {
             findViewById<ImageButton?>(idBtnExportPdf)?.setOnClickListener {
                 // AM は暫定掲示用（同率 1,1,3...）PDF、PM/総合は完全確定版PDF
@@ -645,7 +653,6 @@ class CameraActivity : AppCompatActivity() {
                 }
             }
         }
-
 
 
         // その後に SharedPreferences → 設定ダイアログ呼び出し！
@@ -684,7 +691,6 @@ class CameraActivity : AppCompatActivity() {
                     .show()
 
                 tournamentInfoText.text = "${selectedPattern.patternCode} / $currentSession"
-
 
 
             } else {
@@ -736,6 +742,7 @@ class CameraActivity : AppCompatActivity() {
                                 0 -> { // 開く
                                     openCsvFile(fileTarget)
                                 }
+
                                 1 -> { // ダウンロードへコピー
                                     val uri = copyToDownloads(fileTarget)
                                     if (uri != null) {
@@ -745,31 +752,47 @@ class CameraActivity : AppCompatActivity() {
                                             Toast.LENGTH_LONG
                                         ).show()
                                     } else {
-                                        Toast.makeText(this, "コピーに失敗しました", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(
+                                            this,
+                                            "コピーに失敗しました",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
                                     }
                                 }
+
                                 2 -> { // 共有
                                     shareCsvFile(fileTarget)
                                 }
+
                                 3 -> { // 削除（既存の処理そのまま）
                                     AlertDialog.Builder(this)
                                         .setTitle("削除確認")
                                         .setMessage("「${fileTarget.name}」を削除しますか？")
                                         .setPositiveButton("削除") { _, _ ->
                                             if (fileTarget.delete()) {
-                                                Toast.makeText(this, "削除しました", Toast.LENGTH_SHORT).show()
+                                                Toast.makeText(
+                                                    this,
+                                                    "削除しました",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
                                                 // 一覧更新
                                                 findViewById<ImageButton>(R.id.openCsvImageButton).performClick()
                                             } else {
-                                                Toast.makeText(this, "削除に失敗しました", Toast.LENGTH_SHORT).show()
+                                                Toast.makeText(
+                                                    this,
+                                                    "削除に失敗しました",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
                                             }
                                             dialog.dismiss()
                                         }
                                         .setNegativeButton("キャンセル", null)
                                         .show()
                                 }
+
                                 4 -> { // CSVを保存（公式ラップ形式）
-                                    val pattern = inferPatternFromFileName(fileTarget) ?: selectedPattern
+                                    val pattern =
+                                        inferPatternFromFileName(fileTarget) ?: selectedPattern
                                     runExporterUsingCsvAsToday(fileTarget, pattern) {
                                         PrintableExporter.exportOfficialLapCsv(
                                             context = this,
@@ -777,8 +800,10 @@ class CameraActivity : AppCompatActivity() {
                                         )
                                     }
                                 }
+
                                 5 -> { // PDFを保存（Canvas）
-                                    val pattern = inferPatternFromFileName(fileTarget) ?: selectedPattern
+                                    val pattern =
+                                        inferPatternFromFileName(fileTarget) ?: selectedPattern
                                     runExporterUsingCsvAsToday(fileTarget, pattern) {
                                         val mode =
                                             if (currentSession == "AM")
@@ -794,6 +819,7 @@ class CameraActivity : AppCompatActivity() {
                                         )
                                     }
                                 }
+
                                 6 -> {
                                     d.dismiss() // キャンセル
                                 }
@@ -808,9 +834,6 @@ class CameraActivity : AppCompatActivity() {
 
             dialog.show()
         }
-
-
-
 
 
         // 初期表示設定
@@ -878,7 +901,13 @@ class CameraActivity : AppCompatActivity() {
         }
 
         findViewById<ImageButton>(R.id.entryListImportButton).setOnClickListener {
-            entryListPickerLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv"))
+            entryListPickerLauncher.launch(
+                arrayOf(
+                    "text/csv",
+                    "text/comma-separated-values",
+                    "application/csv"
+                )
+            )
         }
         val prefsEntryCheck = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
         val alreadyLoaded = prefsEntryCheck.getBoolean("entrylist_loaded_once", false)
@@ -898,7 +927,8 @@ class CameraActivity : AppCompatActivity() {
 // ✅ 長押しで解除（トースト付き）
         entryListImportButton.setOnLongClickListener {
             prefsEntryCheck.edit().putBoolean("entrylist_loaded_once", false).apply()
-            Toast.makeText(this, "🔓 entrylist の再読み込みが有効になりました", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "🔓 entrylist の再読み込みが有効になりました", Toast.LENGTH_SHORT)
+                .show()
             true
         }
 
@@ -911,7 +941,7 @@ class CameraActivity : AppCompatActivity() {
 
         cameraExecutor = Executors.newSingleThreadExecutor()
         if (allPermissionsGranted())
-            else ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS)
+        else ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS)
 
         val tournamentSettingButton = findViewById<ImageButton>(R.id.tournamentSettingButton)
         tournamentSettingButton.setOnClickListener {
@@ -934,8 +964,6 @@ class CameraActivity : AppCompatActivity() {
         }
 
 
-
-
 // ← 長押しで entrylist 再読み込み解除＋ボタン復活
         tournamentSettingButton.setOnLongClickListener {
             val prefs = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
@@ -944,7 +972,8 @@ class CameraActivity : AppCompatActivity() {
             val entryListImportButton = findViewById<ImageButton>(R.id.entryListImportButton)
             entryListImportButton.visibility = View.VISIBLE
 
-            Toast.makeText(this, "🔓 entrylist 再読み込みが有効になりました", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "🔓 entrylist 再読み込みが有効になりました", Toast.LENGTH_SHORT)
+                .show()
             true
         }
 
@@ -1020,9 +1049,8 @@ class CameraActivity : AppCompatActivity() {
         }
 
 
-
-
-        val candidateIds = listOf("openCsvImageButton", "openCsvButton", "csvOpenButton", "resultCsvButton")
+        val candidateIds =
+            listOf("openCsvImageButton", "openCsvButton", "csvOpenButton", "resultCsvButton")
         val anchorView = candidateIds
             .map { resources.getIdentifier(it, "id", packageName) }
             .mapNotNull { findViewById<View?>(it) }
@@ -1093,13 +1121,13 @@ class CameraActivity : AppCompatActivity() {
         val rows: MutableList<MutableList<String>> =
             lines.drop(1).map { it.split(",").toMutableList() }.toMutableList()
 
-        val idxEntry    = headerRaw.indexOf("EntryNo")
-        val idxName     = headerRaw.indexOf("Name")
-        val idxClass    = headerRaw.indexOf("Class")
-        val idxTotalG   = headerRaw.indexOf("TotalG")
-        val idxTotalC   = headerRaw.indexOf("TotalC")
-        val idxTotalRank= headerRaw.indexOf("TotalRank")
-        val idxInput    = headerRaw.indexOf("入力")
+        val idxEntry = headerRaw.indexOf("EntryNo")
+        val idxName = headerRaw.indexOf("Name")
+        val idxClass = headerRaw.indexOf("Class")
+        val idxTotalG = headerRaw.indexOf("TotalG")
+        val idxTotalC = headerRaw.indexOf("TotalC")
+        val idxTotalRank = headerRaw.indexOf("TotalRank")
+        val idxInput = headerRaw.indexOf("入力")
 
         if (idxEntry < 0 || idxClass < 0 || idxTotalG < 0 || idxTotalC < 0 || idxInput < 0) {
             // ヘッダが想定と違う → 安全側でそのままFINAL
@@ -1117,11 +1145,11 @@ class CameraActivity : AppCompatActivity() {
         val rowsForCheck: List<List<String>> = rows.map { it.toList() }
         val hasTotalPerfectTie = hasPerfectTieV17(
             header = headerRaw,
-            rows   = rowsForCheck,
+            rows = rowsForCheck,
             inputIdx = idxInput,
-            gIdx     = idxTotalG,
-            cIdx     = idxTotalC,
-            session  = "TOTAL"
+            gIdx = idxTotalG,
+            cIdx = idxTotalC,
+            session = "TOTAL"
         )
 
         if (!hasTotalPerfectTie) {
@@ -1194,8 +1222,8 @@ class CameraActivity : AppCompatActivity() {
             val name = if (idxName >= 0) row.getOrNull(idxName)?.trim().orEmpty() else ""
 
             // TOTAL のセクションで 1点/2点/3点数をカウント（hasPerfectTieV17 の TOTAL と同じ）
-            val one   = countScore(row, secIndices, 1)
-            val two   = countScore(row, secIndices, 2)
+            val one = countScore(row, secIndices, 1)
+            val two = countScore(row, secIndices, 2)
             val three = countScore(row, secIndices, 3)
 
             val rank = if (idxTotalRank >= 0) {
@@ -1209,10 +1237,10 @@ class CameraActivity : AppCompatActivity() {
             list.add(
                 TieMember(
                     rowIndex = index,
-                    row      = row,
-                    entryNo  = entryNo,
-                    name     = name,
-                    clazz    = clazz,
+                    row = row,
+                    entryNo = entryNo,
+                    name = name,
+                    clazz = clazz,
                     g = g, c = c,
                     one = one, two = two, three = three,
                     rank = rank
@@ -1348,11 +1376,13 @@ class CameraActivity : AppCompatActivity() {
                         val text = edit.text.toString().trim()
                         val rank = text.toIntOrNull()
                         if (rank == null || rank <= 0) {
-                            Toast.makeText(this, "正しい順位を入力してください", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this, "正しい順位を入力してください", Toast.LENGTH_SHORT)
+                                .show()
                             return@setOnClickListener
                         }
                         if (!used.add(rank)) {
-                            Toast.makeText(this, "同じ順位が重複しています", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this, "同じ順位が重複しています", Toast.LENGTH_SHORT)
+                                .show()
                             return@setOnClickListener
                         }
                         updates += member to rank
@@ -1428,8 +1458,6 @@ class CameraActivity : AppCompatActivity() {
             }
             .show()
     }
-
-
 
 
     // 保存種別ごとの共通保存フロー
@@ -1530,9 +1558,22 @@ class CameraActivity : AppCompatActivity() {
 
     // 保存処理（保存種別付き）
     private fun proceedWithSave(entryNumber: Int, status: SaveStatus) {
-        pendingSaveBitmap?.let {
+
+        // pendingSaveBitmap が無い場合でも、次カード待ちへ戻す保険をかける
+        val bmp = pendingSaveBitmap
+        if (bmp == null) {
+            Toast.makeText(this, "保存対象がありません", Toast.LENGTH_SHORT).show()
+            rearmAutoCaptureForNextCard("保存対象なし")
+            return
+        }
+
+        var shouldShowToast = false
+        var toastMsg = ""
+
+        try {
             // 1) 認識画像の保存（既存）
-            saveImage(it)
+            saveImage(bmp)
+
             // 2) セクション数の算出（既存ロジック）
             val amCount = when (selectedPattern) {
                 TournamentPattern.PATTERN_4x2 -> 8
@@ -1541,14 +1582,23 @@ class CameraActivity : AppCompatActivity() {
             }
             val totalCount = amCount * 2
             val pmCount = totalCount - amCount
+
             // 3) AM/PM に応じてスコア配列を構成（既存ロジック）
             val scoreList = when (currentSession) {
-                "AM" -> scoreLabelViews.map { it.text.toString().toIntOrNull() } + List(pmCount) { null }
-                "PM" -> List(amCount) { null } + scoreLabelViews.map { it.text.toString().toIntOrNull() }
+                "AM" -> scoreLabelViews.map {
+                    it.text.toString().toIntOrNull()
+                } + List(pmCount) { null }
+
+                "PM" -> List(amCount) { null } + scoreLabelViews.map {
+                    it.text.toString().toIntOrNull()
+                }
+
                 else -> List(amCount + pmCount) { null }
             }.take(amCount + pmCount)
+
             val amScores = scoreList.take(amCount)
             val pmScores = scoreList.drop(amCount).take(pmCount)
+
             var amScore = 0
             var amClean = 0
             for (v in amScores) {
@@ -1557,6 +1607,7 @@ class CameraActivity : AppCompatActivity() {
                     if (v == 0) amClean++
                 }
             }
+
             var pmScore = 0
             var pmClean = 0
             for (v in pmScores) {
@@ -1565,14 +1616,22 @@ class CameraActivity : AppCompatActivity() {
                     if (v == 0) pmClean++
                 }
             }
+
             // 4) 手入力（黄色背景）判定（既存）
             val isManual = resultText.background != null &&
                     (resultText.background as? ColorDrawable)?.color == Color.parseColor("#FFE599")
+
             // 5) クラス変更の可否チェック（既存）
+            // ★ここで return すると finally が走らなくなるので「例外で抜ける」方式にする
             if (currentRowClass != null && !entryMap.containsKey(entryNumber)) {
-                Toast.makeText(this, "⚠️ エントリーが未登録のためクラスを変更できません", Toast.LENGTH_LONG).show()
-                return@let
+                Toast.makeText(
+                    this,
+                    "⚠️ エントリーが未登録のためクラスを変更できません",
+                    Toast.LENGTH_LONG
+                ).show()
+                return  // ← ここは finally が走る（tryの中なのでOK）
             }
+
             // 6) 保存用の entryMap（既存）
             val effectiveEntryMap = entryMap.toMutableMap()
             if (currentRowClass != null) {
@@ -1580,12 +1639,14 @@ class CameraActivity : AppCompatActivity() {
                 val name = existing?.first ?: ""
                 effectiveEntryMap[entryNumber] = Pair(name, currentRowClass!!)
             }
+
             // 7) 保存種別を文字列化して CsvExporter へ
             val statusStr = when (status) {
                 SaveStatus.DNF -> "DNF"
                 SaveStatus.DNS -> "DNS"
                 else -> null
             }
+
             CsvExporter.appendResultToCsv(
                 context = this,
                 currentSession = currentSession,
@@ -1601,25 +1662,40 @@ class CameraActivity : AppCompatActivity() {
                 entryMap = effectiveEntryMap,
                 status = statusStr
             )
-            // 8) UI 戻し＋保存ボタン隠し（既存）
-            guideOverlay.setDetected("red")
-            confirmButton.visibility = View.GONE
-            // 9) 認識UIを初期化（既存）
-            clearRecognitionUi()
-            // 10) 手動クラス指定はクリア（既存）
-            currentRowClass = null
-            updateTournamentInfoText()
-            // 11) 保存種別に応じたトースト
-            val toastMsg = when (status) {
+
+            // 11) 保存種別に応じたトースト（※finallyの後で出す）
+            toastMsg = when (status) {
                 SaveStatus.DNF -> "DNFとして保存しました"
                 SaveStatus.DNS -> "DNSとして保存しました"
                 else -> "保存しました"
             }
+            shouldShowToast = true
+
+        } catch (e: Exception) {
+            Log.e("SAVE", "保存失敗", e)
+            Toast.makeText(this, "保存に失敗しました", Toast.LENGTH_LONG).show()
+
+        } finally {
+            // 8) UI 戻し＋保存ボタン隠し（既存）
+            guideOverlay.setDetected("red")
+            confirmButton.visibility = View.GONE
+
+            // 9) 認識UIを初期化（既存）
+            clearRecognitionUi()
+
+            // ★最重要：次カード待ちへ復帰（これが無いと armed=false / ocr=true のまま固まる）
+            rearmAutoCaptureForNextCard("保存後")
+
+            // 10) 手動クラス指定はクリア（既存）
+            currentRowClass = null
+            updateTournamentInfoText()
+        }
+
+        // finally 後にトースト（UI復帰と混ざらないように）
+        if (shouldShowToast) {
             Toast.makeText(this, toastMsg, Toast.LENGTH_SHORT).show()
         }
     }
-
-
 
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
@@ -1648,16 +1724,95 @@ class CameraActivity : AppCompatActivity() {
 
     }
 
-    private fun startOcrCapture() {
-        // 新規OCR開始時はスコア未解析扱いにリセット
-        hasScoreResult = false
-        resultText.text = "認識中…"
-        guideOverlay.setDetected("red")
-        confirmButton.visibility = View.GONE
-        scorePreview.visibility = View.GONE
-        captureAndAnalyzeMultiple()
+    private var isOcrRunning = false
+
+    private fun startOcrCapture(trigger: String = "auto") {
+        // 二重起動ガード
+        if (isOcrRunning) {
+            Log.d("OCR", "startOcrCapture ignored (already running) trigger=$trigger")
+            return
+        }
+
+        // 手動撮影ボタンを押せない原因の大半が「ここでtrueのまま戻らない」なので、
+        // trueにしたら必ず finally で戻す
+        isOcrRunning = true
+
+        // UIを触るなら必ずUIスレッド
+        runOnUiThread {
+            // ここで「撮影準備ボタン」を無効化しているなら、一時的に無効化でOK
+            // ただし finally で必ず戻すこと
+            prepareButton.isEnabled = false
+            prepareButton.alpha = 0.5f
+        }
+
+        try {
+            // もしCameraXを止める設計なら、ここで必ず起動確認
+            if (!isCameraReady) {
+                startCamera()
+            }
+
+            // 実際の撮影（例：ImageCapture.takePicture）に入る
+            // ※あなたの既存処理に合わせてここは中身を差し替えてOK
+            takeOneShotForOcr(trigger)
+
+        } catch (e: Exception) {
+            Log.e("OCR", "startOcrCapture failed trigger=$trigger", e)
+
+            // エラー時も「次に押せる状態」に戻す
+            runOnUiThread {
+                Toast.makeText(this, "撮影エラー: ${e.message ?: "unknown"}", Toast.LENGTH_SHORT).show()
+            }
+
+        } finally {
+            // ここが超重要：失敗しても必ず復帰させる
+            isOcrRunning = false
+
+            runOnUiThread {
+                // 手動撮影を復活
+                prepareButton.isEnabled = true
+                prepareButton.alpha = 1f
+            }
+
+            // 自動停止設計ならここで停止（あなたの方針に合わせてON/OFF）
+            // stopCamera() を持ってるなら呼ぶ。無ければunbindAllだけでもOK。
+            // 例：
+            // stopCameraSafely("ocr finished")
+        }
     }
 
+    // ここはあなたの既存の takePicture/OCR 呼び出しに合わせて中身を書き換える前提。
+// ただ「例外は投げる」「成功/失敗で必ずコールバックが返る」を守る。
+    private fun takeOneShotForOcr(trigger: String) {
+        val ic = imageCapture ?: throw IllegalStateException("imageCapture is null")
+
+        // あなたの既存の OutputFileOptions / Executor を使ってOK
+        ic.takePicture(
+            ContextCompat.getMainExecutor(this),
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(image: ImageProxy) {
+                    try {
+                        // ここで OCR 実行（あなたの既存処理へ）
+                        // runOcr(image) など
+                    } catch (e: Exception) {
+                        Log.e("OCR", "OCR pipeline error", e)
+                    } finally {
+                        image.close()
+                        // ※ここで rearmAutoCaptureForNextCard を呼ぶかは「保存後復帰」設計次第
+                        // OCRだけ終わった時点で次カード待ちへ戻したいなら、ここで呼んでもOK
+                        // rearmAutoCaptureForNextCard("ocr done")
+                    }
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    Log.e("OCR", "takePicture error trigger=$trigger", exception)
+                    // ここで例外を投げても finally は走らないので、投げない
+                    runOnUiThread {
+                        Toast.makeText(this@CameraActivity, "撮影失敗: ${exception.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        )
+    }
 
 
 
@@ -1685,20 +1840,65 @@ class CameraActivity : AppCompatActivity() {
         cameraProviderFuture.addListener({
             val cameraProvider = cameraProviderFuture.get()
 
+            // --- Preview ---
             val preview = Preview.Builder().build().also {
                 it.setSurfaceProvider(previewView.surfaceProvider)
             }
 
+            // --- ImageCapture（OCR用）---
             imageCapture = ImageCapture.Builder()
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                 .build()
+
+            // --- ImageAnalysis（白カード検出用）---
+            val imageAnalysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+
+            imageAnalysis.setAnalyzer(
+                ContextCompat.getMainExecutor(this)
+            ) { imageProxy ->
+                try {
+                    // 明るさ・白率を計算（別ファイルに分離済み）
+                    val (avgLuma, whiteRatio) = AutoCardImageMetrics.from(imageProxy)
+
+                    val decision = autoDetector.onFrame(
+                        AutoCardDetector.Inputs(
+                            avgLuma = avgLuma,
+                            whiteRatio = whiteRatio,
+                            armed = autoCaptureArmed,
+                            suspended = false,          // ★スリープ封印中は false 固定推奨
+                            isOcrRunning = isOcrRunning,
+                            hasScoreResult = hasScoreResult
+                        )
+                    )
+
+                    if (decision is AutoCardDetector.Decision.Fire) {
+                        // Auto発火：ここで OCR 開始
+                        startOcrCapture(trigger = "auto")
+                    }
+
+                } catch (e: Exception) {
+                    Log.e("AUTO", "analyzer error", e)
+
+                } finally {
+                    // ★これが無いと詰まってカメラが固まる（最重要）
+                    imageProxy.close()
+                }
+            }
+
 
             val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
             try {
                 cameraProvider.unbindAll()
+
                 camera = cameraProvider.bindToLifecycle(
-                    this, cameraSelector, preview, imageCapture
+                    this,
+                    cameraSelector,
+                    preview,
+                    imageCapture,
+                    imageAnalysis    // ← ★ここが重要（追加）
                 )
 
                 // 🔥 表示系を正しく復元
@@ -1712,10 +1912,12 @@ class CameraActivity : AppCompatActivity() {
 
                 window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 isCameraReady = true
-                Log.d("CAMERA", "📷 カメラ起動完了")
+                Log.d("CAMERA", "📷 カメラ起動完了（AutoCard 有効）")
+
             } catch (exc: Exception) {
                 Log.e("CAMERA", "❌ カメラ起動失敗", exc)
             }
+
         }, ContextCompat.getMainExecutor(this))
     }
 
@@ -1821,10 +2023,6 @@ class CameraActivity : AppCompatActivity() {
     }
 
 
-
-
-
-
     private fun recognizeText(
         bitmap: Bitmap,
         fullImage: Bitmap,
@@ -1860,10 +2058,19 @@ class CameraActivity : AppCompatActivity() {
                         currentRowClass = clazz
                         // tournamentInfoText にクラスを追加表示（既存表示を壊さない）。ここではローカルprefsを使う
                         val prefsLocal = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
-                        val typeLabel = if (prefsLocal.getString("tournamentType", "unknown") == "championship") "選手権" else "ビギナー"
-                        tournamentInfoText.text = "${selectedPattern.patternCode} / $currentSession / $typeLabel / ${currentRowClass ?: "-"}"
+                        val typeLabel = if (prefsLocal.getString(
+                                "tournamentType",
+                                "unknown"
+                            ) == "championship"
+                        ) "選手権" else "ビギナー"
+                        tournamentInfoText.text =
+                            "${selectedPattern.patternCode} / $currentSession / $typeLabel / ${currentRowClass ?: "-"}"
                     } else {
-                        Toast.makeText(this, "⚠️ EntryNo=$entryNumber は未登録です", Toast.LENGTH_LONG).show()
+                        Toast.makeText(
+                            this,
+                            "⚠️ EntryNo=$entryNumber は未登録です",
+                            Toast.LENGTH_LONG
+                        ).show()
                         currentRowClass = null
                     }
 
@@ -1918,7 +2125,6 @@ class CameraActivity : AppCompatActivity() {
     }
 
 
-
     private fun updateScoreUi(result: ScoreAnalyzer.ScoreResult) {
         // スコアが適用された → 画面に解析結果あり
         hasScoreResult = true
@@ -1948,7 +2154,13 @@ class CameraActivity : AppCompatActivity() {
                 when (safeScore) {
                     null -> label.setBackgroundResource(R.drawable.bg_score_blank)
                     0 -> label.setBackgroundResource(R.drawable.bg_score_clean)
-                    in listOf(1, 2, 3, 5) -> label.setBackgroundResource(R.drawable.bg_score_deduction)
+                    in listOf(
+                        1,
+                        2,
+                        3,
+                        5
+                    ) -> label.setBackgroundResource(R.drawable.bg_score_deduction)
+
                     99 -> label.setBackgroundResource(R.drawable.bg_score_unknown) // 99専用背景
                     else -> label.setBackgroundResource(R.drawable.bg_score_unknown)
                 }
@@ -1966,7 +2178,6 @@ class CameraActivity : AppCompatActivity() {
         private const val REQUEST_CODE_PERMISSIONS = 10
 
     }
-
 
 
     private fun showDebugScoreOnPreview(bitmap: Bitmap) {
@@ -2021,7 +2232,6 @@ class CameraActivity : AppCompatActivity() {
     }
     // CameraActivity.kt にまるっと追加するコード
 // 大会設定のダイアログ（起動時表示 + 選択保持 + UI反映）
-
 
 
     private fun showInitialTournamentSettingDialog(onComplete: () -> Unit) {
@@ -2133,7 +2343,8 @@ class CameraActivity : AppCompatActivity() {
                 android.app.DatePickerDialog(
                     this@CameraActivity,
                     { _, yy, mm, dd ->
-                        val ys = String.format(Locale.getDefault(), "%04d-%02d-%02d", yy, mm + 1, dd)
+                        val ys =
+                            String.format(Locale.getDefault(), "%04d-%02d-%02d", yy, mm + 1, dd)
                         this@apply.setText(ys)
                     },
                     y, m, d
@@ -2171,11 +2382,16 @@ class CameraActivity : AppCompatActivity() {
                     putString("tournamentType", tournamentType)
 
                     try {
-                        val nameText = dialogView.findViewById<EditText>(editTournamentName.id)?.text?.toString()?.trim()
-                        val dateText = dialogView.findViewById<EditText>(editEventDate.id)?.text?.toString()?.trim()
+                        val nameText =
+                            dialogView.findViewById<EditText>(editTournamentName.id)?.text?.toString()
+                                ?.trim()
+                        val dateText =
+                            dialogView.findViewById<EditText>(editEventDate.id)?.text?.toString()
+                                ?.trim()
                         if (!nameText.isNullOrBlank()) putString("tournamentName", nameText)
                         if (!dateText.isNullOrBlank()) putString("eventDate", dateText)
-                    } catch (_: Exception) {}
+                    } catch (_: Exception) {
+                    }
 
                     apply()
                 }
@@ -2226,7 +2442,6 @@ class CameraActivity : AppCompatActivity() {
     }
 
 
-
     private fun updateSessionButtons(amButton: Button, pmButton: Button) {
         if (currentSession == "AM") {
             amButton.setBackgroundColor(Color.RED)
@@ -2241,6 +2456,7 @@ class CameraActivity : AppCompatActivity() {
 
         }
     }
+
     private fun openCsvFile(file: File) {
         val uri = FileProvider.getUriForFile(
             this,
@@ -2258,8 +2474,6 @@ class CameraActivity : AppCompatActivity() {
         }
 
 
-
-
     }
 
     // ヘルパー: Downloads にコピー（API29+ は MediaStore、旧API は直接コピー）
@@ -2267,7 +2481,8 @@ class CameraActivity : AppCompatActivity() {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val resolver = contentResolver
-                val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                val collection =
+                    MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
                 val values = ContentValues().apply {
                     put(MediaStore.Downloads.DISPLAY_NAME, src.name)
                     put(MediaStore.Downloads.MIME_TYPE, "text/csv")
@@ -2282,7 +2497,8 @@ class CameraActivity : AppCompatActivity() {
                 resolver.update(uri, values, null, null)
                 uri
             } else {
-                val destDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val destDir =
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                 if (!destDir.exists()) destDir.mkdirs()
                 val dest = File(destDir, src.name)
                 src.copyTo(dest, overwrite = true)
@@ -2340,9 +2556,14 @@ class CameraActivity : AppCompatActivity() {
                     val (name, clazz) = entry
                     Toast.makeText(this, "✅ $name さん [$clazz] を選択", Toast.LENGTH_SHORT).show()
                     currentRowClass = clazz
-                    tournamentInfoText.text = "${selectedPattern.patternCode} / $currentSession / ${currentRowClass ?: "-"}"
+                    tournamentInfoText.text =
+                        "${selectedPattern.patternCode} / $currentSession / ${currentRowClass ?: "-"}"
                 } else {
-                    Toast.makeText(this, "⚠️ EntryNo=$no は未登録です（保存時は拒否されます）", Toast.LENGTH_LONG).show()
+                    Toast.makeText(
+                        this,
+                        "⚠️ EntryNo=$no は未登録です（保存時は拒否されます）",
+                        Toast.LENGTH_LONG
+                    ).show()
                     currentRowClass = null
                 }
 
@@ -2401,12 +2622,12 @@ class CameraActivity : AppCompatActivity() {
                     confirmButton.visibility = View.VISIBLE
                 } else {
                     guideOverlay.setDetected("red")
-                    Toast.makeText(this, "⚠️ 判定一致せず：手動確認してください", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "⚠️ 判定一致せず：手動確認してください", Toast.LENGTH_LONG)
+                        .show()
                     // エラー時はチェック音を鳴らす
                     playJudgeSound(false)
                     confirmButton.visibility = View.VISIBLE
                 }
-
 
 
                 // 自動モード時のみ停止（既存と同等）
@@ -2488,7 +2709,8 @@ class CameraActivity : AppCompatActivity() {
         }
 
         // UI初期化（既存の startOcrCapture と揃える）
-        resultText.text = (resultText.text.takeIf { it.toString().contains(Regex("\\d")) } ?: "No: -")
+        resultText.text =
+            (resultText.text.takeIf { it.toString().contains(Regex("\\d")) } ?: "No: -")
         guideOverlay.setDetected("red")
         confirmButton.visibility = View.GONE
         scorePreview.visibility = View.GONE
@@ -2513,7 +2735,8 @@ class CameraActivity : AppCompatActivity() {
                 val selected = options[which]
                 currentRowClass = selected
                 // UI 表示を更新
-                tournamentInfoText.text = "${selectedPattern.patternCode} / $currentSession / ${currentRowClass ?: "-"}"
+                tournamentInfoText.text =
+                    "${selectedPattern.patternCode} / $currentSession / ${currentRowClass ?: "-"}"
                 Toast.makeText(this, "クラスを $selected に変更しました", Toast.LENGTH_SHORT).show()
                 dialog.dismiss()
             }
@@ -2549,9 +2772,9 @@ class CameraActivity : AppCompatActivity() {
             val rows = allLines.drop(1).map { it.split(",") }
 
             val entryNoIdx = headerRaw.indexOf("EntryNo")
-            val amGIdx     = headerRaw.indexOf("AmG")
-            val amCIdx     = headerRaw.indexOf("AmC")
-            val inputIdx   = headerRaw.indexOf("入力")
+            val amGIdx = headerRaw.indexOf("AmG")
+            val amCIdx = headerRaw.indexOf("AmC")
+            val inputIdx = headerRaw.indexOf("入力")
 
             if (entryNoIdx == -1 || amGIdx == -1 || amCIdx == -1 || inputIdx == -1) {
                 Toast.makeText(this, "ヘッダー解析エラー(AMチェック)", Toast.LENGTH_LONG).show()
@@ -2571,7 +2794,11 @@ class CameraActivity : AppCompatActivity() {
             )
 
             if (hasPerfectTie) {
-                Toast.makeText(this, "AMに完全同点があります。掲示前に確認してください", Toast.LENGTH_LONG).show()
+                Toast.makeText(
+                    this,
+                    "AMに完全同点があります。掲示前に確認してください",
+                    Toast.LENGTH_LONG
+                ).show()
             } else {
                 Toast.makeText(this, "AM完全同点はありません", Toast.LENGTH_SHORT).show()
             }
@@ -2608,9 +2835,6 @@ class CameraActivity : AppCompatActivity() {
     }
 
 
-
-
-
     // ------------------------------------------------------------
 // 未集計チェック（AM / PM 共通）
 // ------------------------------------------------------------
@@ -2636,11 +2860,11 @@ class CameraActivity : AppCompatActivity() {
             val rows = allLines.drop(1).map { it.split(",") }
 
             val entryNoIdx = header.indexOf("EntryNo")
-            val inputIdx   = header.indexOf("入力")
-            val amGIdx     = header.indexOf("AmG")
-            val amCIdx     = header.indexOf("AmC")
-            val pmGIdx     = header.indexOf("PmG")
-            val pmCIdx     = header.indexOf("PmC")
+            val inputIdx = header.indexOf("入力")
+            val amGIdx = header.indexOf("AmG")
+            val amCIdx = header.indexOf("AmC")
+            val pmGIdx = header.indexOf("PmG")
+            val pmCIdx = header.indexOf("PmC")
 
             if (entryNoIdx == -1 || inputIdx == -1 ||
                 amGIdx == -1 || amCIdx == -1 || pmGIdx == -1 || pmCIdx == -1
@@ -2686,6 +2910,7 @@ class CameraActivity : AppCompatActivity() {
             Toast.makeText(this, "未集計チェックでエラー: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
+
     // AM / PM の未集計があるかだけを判定（ダイアログは出さない）
     private fun hasMissingEntriesForSession(session: String): Boolean {
         return try {
@@ -2705,14 +2930,15 @@ class CameraActivity : AppCompatActivity() {
             val rows = allLines.drop(1).map { it.split(",") }
 
             val entryNoIdx = header.indexOf("EntryNo")
-            val inputIdx   = header.indexOf("入力")
-            val amGIdx     = header.indexOf("AmG")
-            val amCIdx     = header.indexOf("AmC")
-            val pmGIdx     = header.indexOf("PmG")
-            val pmCIdx     = header.indexOf("PmC")
+            val inputIdx = header.indexOf("入力")
+            val amGIdx = header.indexOf("AmG")
+            val amCIdx = header.indexOf("AmC")
+            val pmGIdx = header.indexOf("PmG")
+            val pmCIdx = header.indexOf("PmC")
 
             if (entryNoIdx == -1 || inputIdx == -1 ||
-                amGIdx == -1 || amCIdx == -1 || pmGIdx == -1 || pmCIdx == -1) {
+                amGIdx == -1 || amCIdx == -1 || pmGIdx == -1 || pmCIdx == -1
+            ) {
                 return false
             }
 
@@ -2755,8 +2981,10 @@ class CameraActivity : AppCompatActivity() {
         val msg = when {
             hasAmMissing && hasPmMissing ->
                 "AM / PM に未集計エントリーがあります。出力してよろしいですか？"
+
             hasAmMissing ->
                 "AMに未集計エントリーがあります。出力してよろしいですか？"
+
             else ->
                 "PMに未集計エントリーがあります。出力してよろしいですか？"
         }
@@ -2795,12 +3023,12 @@ class CameraActivity : AppCompatActivity() {
                 .map { it.replace("\uFEFF", "").trim() }
             val rows = allLines.drop(1).map { it.split(",") }
 
-            val entryNoIdx  = header.indexOf("EntryNo")
-            val inputIdx    = header.indexOf("入力")
-            val totalGIdx   = header.indexOf("TotalG")
-            val totalCIdx   = header.indexOf("TotalC")
-            val pmGIdx      = header.indexOf("PmG")
-            val pmCIdx      = header.indexOf("PmC")
+            val entryNoIdx = header.indexOf("EntryNo")
+            val inputIdx = header.indexOf("入力")
+            val totalGIdx = header.indexOf("TotalG")
+            val totalCIdx = header.indexOf("TotalC")
+            val pmGIdx = header.indexOf("PmG")
+            val pmCIdx = header.indexOf("PmC")
 
             if (entryNoIdx == -1 || inputIdx == -1 ||
                 totalGIdx == -1 || totalCIdx == -1 ||
@@ -2833,8 +3061,8 @@ class CameraActivity : AppCompatActivity() {
                 if (row == null) {
                     true
                 } else {
-                    val pmGBlank   = row.getOrNull(pmGIdx).isNullOrBlank()
-                    val pmCBlank   = row.getOrNull(pmCIdx).isNullOrBlank()
+                    val pmGBlank = row.getOrNull(pmGIdx).isNullOrBlank()
+                    val pmCBlank = row.getOrNull(pmCIdx).isNullOrBlank()
                     val inputLabel = row.getOrNull(inputIdx).orEmpty()
                     val isDnsOrDnf = (inputLabel == "DNS" || inputLabel.contains("DNF"))
 
@@ -2930,6 +3158,7 @@ class CameraActivity : AppCompatActivity() {
         // 同じ Key が2件以上あれば「完全同点あり」
         return counts.values.any { it > 1 }
     }
+
     // ファイル名からパターンを推測（result_5x2_20251207.csv → "5x2" → TournamentPattern）
     private fun inferPatternFromFileName(file: File): TournamentPattern? {
         val name = file.nameWithoutExtension  // result_5x2_20251207
@@ -2985,8 +3214,6 @@ class CameraActivity : AppCompatActivity() {
     }
 
 
-
-
     // 認識結果を安全に初期化（UIのみ）
     private fun clearRecognitionUi() {
         // スコアラベルを空に＆背景リセット
@@ -3007,7 +3234,7 @@ class CameraActivity : AppCompatActivity() {
         scorePreview.setImageDrawable(null)
         scorePreview.visibility = View.GONE
 
-        // 状態フラグと一時画像をクリア
+        // 状態フラグと一時画像をクリア（UI側の表示状態）
         hasScoreResult = false
         lastOcrHadEntry = false
         pendingSaveBitmap = null
@@ -3017,5 +3244,26 @@ class CameraActivity : AppCompatActivity() {
         confirmButton.visibility = View.GONE
     }
 
+    /**
+     * 保存後 / OCR完了後に「次カード待ち」へ確実に復帰させる
+     * ここが armed=true / ocr=false を作る唯一の場所、という運用にする。
+     */
 
+    private fun rearmAutoCaptureForNextCard(reason: String) {
+        // 🔁 次カード待ちへ復帰
+        isOcrRunning = false
+        autoCaptureArmed = true
+        hasScoreResult = false
+
+        autoDetector.resetForNextCard(reason)
+
+        Log.d("AUTO", "rearm for next card: $reason")
+
+        // OCR後にカメラを止めている運用なら、ここで再起動
+        if (!isCameraReady) {
+            startCamera()
+        }
+    }
 }
+
+
