@@ -62,12 +62,27 @@ class CameraActivity : AppCompatActivity() {
     private val inactivityHandler = Handler(Looper.getMainLooper())
     private var isCameraSuspended = false
 
-    private var isManualCameraControl = false
+
     private lateinit var guideToggleButton: ImageButton
 
     private var isCameraReady: Boolean = false
     private var entryMap: Map<Int, Pair<String, String>> = emptyMap()
 
+    // --- AutoCard / 監視モード ---
+    private var autoEnabled: Boolean = true          // 長押しでON/OFF
+    private var isMonitoring: Boolean = false        // Analysis監視が動いているか
+    private var isActiveView: Boolean = false        // Preview表示中か（視認モード）
+
+    // OCR二重起動ガード
+    private var isOcrRunning: Boolean = false
+
+    // CameraX usecases
+    private var imageAnalysis: ImageAnalysis? = null
+    private var preview: Preview? = null
+
+    private val autoDetector = AutoCardDetector()
+
+    private var hasUnSavedResult: Boolean = false
 
 
 
@@ -95,11 +110,6 @@ class CameraActivity : AppCompatActivity() {
     private lateinit var guideOverlay: GuideOverlayView
     private lateinit var scorePreview: ImageView
     private lateinit var tournamentInfoText: TextView
-
-
-
-
-    private var isOcrRunning = false
 
     private var isFlashOn = false
     private var pendingSaveBitmap: Bitmap? = null
@@ -512,7 +522,6 @@ class CameraActivity : AppCompatActivity() {
             if (!isCameraReady) {
                 startCamera()
                 isCameraReady = true
-                isManualCameraControl = true
                 Toast.makeText(this, "📷 手動でカメラ起動", Toast.LENGTH_SHORT).show()
             } else {
                 val cameraProvider = ProcessCameraProvider.getInstance(this).get()
@@ -520,7 +529,7 @@ class CameraActivity : AppCompatActivity() {
                 camera = null
                 imageCapture = null
                 isCameraReady = false
-                isManualCameraControl = false
+
 
                 // 🔥 表示を完全にOFF
                 previewView.visibility = View.GONE
@@ -576,10 +585,8 @@ class CameraActivity : AppCompatActivity() {
         scorePreview = findViewById(R.id.scorePreview)
         previewView = findViewById(R.id.previewView)
 
-        prepareButton.setOnLongClickListener {
-            confirmButton.performLongClick()
-            true
-        }
+
+
 
         // 追加: 掲示用出力ボタンのクリックリスナー（R生成前の環境でも安全に動作するよう動的取得）
         val exportS1ButtonId = resources.getIdentifier("exportS1Button", "id", packageName)
@@ -836,22 +843,37 @@ class CameraActivity : AppCompatActivity() {
         }
 
 
-        // 撮影準備
-        prepareButton.setOnClickListener {
-            if (!isCameraReady) {
-                startCamera()
-                isCameraReady = true
-                isManualCameraControl = false
 
-                // カメラ起動が安定してから OCR 開始（1回だけ）
-                Handler(Looper.getMainLooper()).postDelayed({
-                    startOcrCapture()
-                }, 300)
+        // 単押し：カメラがOFFなら「監視開始」 / ONなら「手動でOCR開始」
+        prepareButton.setOnClickListener {
+            if (!isMonitoring) {
+                startMonitoring(reason = "prepareButton")
+                Toast.makeText(this, "📷 監視ON（自動待機）", Toast.LENGTH_SHORT).show()
             } else {
-                // 2回目以降も OCR は常に startOcrCapture() 経由で1回だけ
-                startOcrCapture()
+                // 監視中なら手動撮影（エラー救済用）
+                enterActiveView(reason = "manual")
+                startOcrCapture(trigger = "manual")
             }
         }
+
+// 長押し：自動ON/OFF（監視ON中にカード発火するかどうか）
+        prepareButton.setOnLongClickListener {
+            autoEnabled = !autoEnabled
+            Toast.makeText(
+                this,
+                if (autoEnabled) "✅ 自動モード ON（カードで発火）" else "⛔ 自動モード OFF（手動のみ）",
+                Toast.LENGTH_SHORT
+            ).show()
+
+            // 自動ONにしたのに監視がOFFなら起動しておく
+            if (autoEnabled && !isMonitoring) {
+                startMonitoring(reason = "autoEnabled_on")
+            }
+            true
+        }
+
+
+
 
 
         // 保存処理
@@ -1533,6 +1555,7 @@ class CameraActivity : AppCompatActivity() {
         pendingSaveBitmap?.let {
             // 1) 認識画像の保存（既存）
             saveImage(it)
+
             // 2) セクション数の算出（既存ロジック）
             val amCount = when (selectedPattern) {
                 TournamentPattern.PATTERN_4x2 -> 8
@@ -1541,14 +1564,17 @@ class CameraActivity : AppCompatActivity() {
             }
             val totalCount = amCount * 2
             val pmCount = totalCount - amCount
+
             // 3) AM/PM に応じてスコア配列を構成（既存ロジック）
             val scoreList = when (currentSession) {
                 "AM" -> scoreLabelViews.map { it.text.toString().toIntOrNull() } + List(pmCount) { null }
                 "PM" -> List(amCount) { null } + scoreLabelViews.map { it.text.toString().toIntOrNull() }
                 else -> List(amCount + pmCount) { null }
             }.take(amCount + pmCount)
+
             val amScores = scoreList.take(amCount)
             val pmScores = scoreList.drop(amCount).take(pmCount)
+
             var amScore = 0
             var amClean = 0
             for (v in amScores) {
@@ -1557,6 +1583,7 @@ class CameraActivity : AppCompatActivity() {
                     if (v == 0) amClean++
                 }
             }
+
             var pmScore = 0
             var pmClean = 0
             for (v in pmScores) {
@@ -1565,14 +1592,17 @@ class CameraActivity : AppCompatActivity() {
                     if (v == 0) pmClean++
                 }
             }
+
             // 4) 手入力（黄色背景）判定（既存）
             val isManual = resultText.background != null &&
                     (resultText.background as? ColorDrawable)?.color == Color.parseColor("#FFE599")
+
             // 5) クラス変更の可否チェック（既存）
             if (currentRowClass != null && !entryMap.containsKey(entryNumber)) {
                 Toast.makeText(this, "⚠️ エントリーが未登録のためクラスを変更できません", Toast.LENGTH_LONG).show()
                 return@let
             }
+
             // 6) 保存用の entryMap（既存）
             val effectiveEntryMap = entryMap.toMutableMap()
             if (currentRowClass != null) {
@@ -1580,12 +1610,14 @@ class CameraActivity : AppCompatActivity() {
                 val name = existing?.first ?: ""
                 effectiveEntryMap[entryNumber] = Pair(name, currentRowClass!!)
             }
+
             // 7) 保存種別を文字列化して CsvExporter へ
             val statusStr = when (status) {
                 SaveStatus.DNF -> "DNF"
                 SaveStatus.DNS -> "DNS"
                 else -> null
             }
+
             CsvExporter.appendResultToCsv(
                 context = this,
                 currentSession = currentSession,
@@ -1601,23 +1633,36 @@ class CameraActivity : AppCompatActivity() {
                 entryMap = effectiveEntryMap,
                 status = statusStr
             )
+
             // 8) UI 戻し＋保存ボタン隠し（既存）
             guideOverlay.setDetected("red")
             confirmButton.visibility = View.GONE
+
             // 9) 認識UIを初期化（既存）
             clearRecognitionUi()
+
             // 10) 手動クラス指定はクリア（既存）
             currentRowClass = null
             updateTournamentInfoText()
+
             // 11) 保存種別に応じたトースト
             val toastMsg = when (status) {
                 SaveStatus.DNF -> "DNFとして保存しました"
                 SaveStatus.DNS -> "DNSとして保存しました"
                 else -> "保存しました"
             }
+
+            // ★ 保存成功後：次カードの発火を許可（ここが必須）
+            hasUnSavedResult = false
+            autoDetector.reset("after_save")
+
+            // ★ 画面を待機状態へ（ここは1回だけ）
+            returnToIdleView(reason = "after_save")
+
             Toast.makeText(this, toastMsg, Toast.LENGTH_SHORT).show()
         }
     }
+
 
 
 
@@ -1648,19 +1693,38 @@ class CameraActivity : AppCompatActivity() {
 
     }
 
-    private fun startOcrCapture() {
-        // 新規OCR開始時はスコア未解析扱いにリセット
-        hasScoreResult = false
-        resultText.text = "認識中…"
-        guideOverlay.setDetected("red")
-        confirmButton.visibility = View.GONE
-        scorePreview.visibility = View.GONE
-        captureAndAnalyzeMultiple()
+    private fun startOcrCapture(trigger: String = "AUTO") {
+        if (isOcrRunning) {
+            Log.d("OCR", "startOcrCapture blocked: already running ($trigger)")
+            return
+        }
+        isOcrRunning = true
+
+        runOnUiThread {
+            // OCR中の連打防止（監視は続く）
+            prepareButton.isEnabled = false
+            prepareButton.alpha = 0.5f
+        }
+
+        try {
+            // ここはあなたの既存を使用
+            captureAndAnalyzeMultiple()
+        } catch (e: Exception) {
+            Log.e("OCR", "startOcrCapture failed", e)
+            Toast.makeText(this, "OCR開始エラー", Toast.LENGTH_SHORT).show()
+            finishOcrCycle("error_start")
+        }
     }
 
+    private fun finishOcrCycle(reason: String) {
+        Log.d("OCR", "finishOcrCycle: $reason")
+        isOcrRunning = false
 
-
-
+        runOnUiThread {
+            prepareButton.isEnabled = true
+            prepareButton.alpha = 1f
+        }
+    }
 
 
 
@@ -1693,15 +1757,44 @@ class CameraActivity : AppCompatActivity() {
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                 .build()
 
+            val imageAnalysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+
+            imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(this)) { imageProxy ->
+                try {
+                    if (hasUnSavedResult) return@setAnalyzer  // ←★追加
+
+                    val (avgLuma, whiteRatio) = AutoCardImageMetrics.from(imageProxy)
+
+                    if (autoEnabled) {
+                        val decision = autoDetector.onFrame(
+                            avgLuma = avgLuma,
+                            whiteRatio = whiteRatio,
+                            isOcrRunning = isOcrRunning
+                        )
+                        if (decision is AutoCardDetector.Decision.Fire) {
+                            startOcrCapture(trigger = "auto")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("AUTO", "analyzer error", e)
+                } finally {
+                    imageProxy.close()
+                }
+            }
+
+
+
             val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
             try {
                 cameraProvider.unbindAll()
                 camera = cameraProvider.bindToLifecycle(
-                    this, cameraSelector, preview, imageCapture
+                    this, cameraSelector, preview, imageCapture, imageAnalysis
                 )
 
-                // 🔥 表示系を正しく復元
+                // 表示復帰
                 previewView.visibility = View.VISIBLE
                 previewView.alpha = 1f
                 previewView.setBackgroundColor(Color.TRANSPARENT)
@@ -1711,18 +1804,169 @@ class CameraActivity : AppCompatActivity() {
                     .setBackgroundColor(Color.TRANSPARENT)
 
                 window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
                 isCameraReady = true
-                Log.d("CAMERA", "📷 カメラ起動完了")
+                Log.d("CAMERA", "📷 カメラ起動完了（最小Auto）")
+
             } catch (exc: Exception) {
                 Log.e("CAMERA", "❌ カメラ起動失敗", exc)
             }
+
         }, ContextCompat.getMainExecutor(this))
     }
 
+    private fun startMonitoring(reason: String = "") {
+        if (isMonitoring) return
+
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+        cameraProviderFuture.addListener({
+            val cameraProvider = cameraProviderFuture.get()
+
+            val selector = CameraSelector.DEFAULT_BACK_CAMERA
+
+            // ImageAnalysis（監視だけ）
+            val analysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+
+            analysis.setAnalyzer(ContextCompat.getMainExecutor(this)) { imageProxy ->
+                try {
+                    if (hasUnSavedResult) return@setAnalyzer  // ←★追加
+
+                    val (avgLuma, whiteRatio) = AutoCardImageMetrics.from(imageProxy)
+
+                    if (autoEnabled) {
+                        val decision = autoDetector.onFrame(
+                            avgLuma = avgLuma,
+                            whiteRatio = whiteRatio,
+                            isOcrRunning = isOcrRunning
+                        )
+                        if (decision is AutoCardDetector.Decision.Fire) {
+                            enterActiveView(reason = "auto_fire")
+                            startOcrCapture(trigger = "auto")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("AUTO", "analyzer error", e)
+                } finally {
+                    imageProxy.close()
+                }
+            }
+
+
+            try {
+                cameraProvider.unbindAll()
+                camera = cameraProvider.bindToLifecycle(this, selector, analysis)
+
+                imageAnalysis = analysis
+                isMonitoring = true
+                isCameraReady = true
+
+                // 監視中の表示は黒（疑似OFF）
+                returnToIdleView(reason = "monitoring_start")
+
+                Log.d("CAMERA", "👁️ Monitoring ON: $reason")
+            } catch (e: Exception) {
+                Log.e("CAMERA", "startMonitoring failed", e)
+                Toast.makeText(this, "カメラ監視の開始に失敗", Toast.LENGTH_SHORT).show()
+            }
+
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun enterActiveView(reason: String = "") {
+        if (!isMonitoring) {
+            // 監視がOFFなら、まず監視ONにしてから
+            startMonitoring(reason = "enterActiveView($reason)")
+            // startMonitoringが非同期なので即return（次フレームで自動に任せる）
+            return
+        }
+        if (isActiveView) return
+
+        val cameraProvider = ProcessCameraProvider.getInstance(this).get()
+        val selector = CameraSelector.DEFAULT_BACK_CAMERA
+
+        // Preview
+        val p = Preview.Builder().build().also {
+            it.setSurfaceProvider(previewView.surfaceProvider)
+        }
+
+        // ImageCapture（OCR撮影用）
+        val cap = ImageCapture.Builder()
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .build()
+
+        try {
+            // 監視(analysis)は維持したいので、同時にbindし直す
+            val analysis = imageAnalysis ?: run {
+                // もし何かでnullなら監視を作り直す
+                Log.w("CAMERA", "imageAnalysis is null, restart monitoring")
+                startMonitoring("analysis_null")
+                return
+            }
+
+            cameraProvider.unbindAll()
+            camera = cameraProvider.bindToLifecycle(this, selector, p, cap, analysis)
+
+            preview = p
+            imageCapture = cap
+            isActiveView = true
+            isCameraReady = true
+
+            // 表示ON
+            previewView.visibility = View.VISIBLE
+            previewView.alpha = 1f
+            previewView.setBackgroundColor(Color.TRANSPARENT)
+
+            guideOverlay.visibility = View.VISIBLE
+            findViewById<FrameLayout>(R.id.previewContainer).setBackgroundColor(Color.TRANSPARENT)
+
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+            Log.d("CAMERA", "🌞 ActiveView ON: $reason")
+        } catch (e: Exception) {
+            Log.e("CAMERA", "enterActiveView failed", e)
+        }
+    }
+
+    private fun returnToIdleView(reason: String = "") {
+        // 画面は黒にして負荷を抑える（監視は継続）
+        isActiveView = false
+
+        previewView.visibility = View.GONE
+        previewView.alpha = 0f
+        previewView.setBackgroundColor(Color.BLACK)
+
+        guideOverlay.visibility = View.GONE
+        findViewById<FrameLayout>(R.id.previewContainer).setBackgroundColor(Color.BLACK)
+
+        // 画面点灯維持は解除しておく（必要時だけON）
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        Log.d("CAMERA", "🌙 IdleView: $reason")
+    }
+
+
+
+
+
+
 
     private fun captureAndAnalyzeMultiple() {
-        val currentImageCapture = imageCapture ?: return
+        val currentImageCapture = imageCapture
+        if (currentImageCapture == null) {
+            Toast.makeText(this, "カメラ未準備（imageCapture=null）", Toast.LENGTH_SHORT).show()
+            finishOcrCycle("imageCapture null")
+            return
+        }
+
         val results = mutableListOf<ScoreAnalyzer.ScoreResult>()
+
+        fun finalizeAndFinish() {
+            finishOcrCycle("done")
+            // 方針：OCR後はいったん止める（次はボタン押せば復帰できる）
+            stopCamera("OCR finished")
+        }
 
         fun takeNext(count: Int) {
             if (count >= 3) {
@@ -1730,20 +1974,15 @@ class CameraActivity : AppCompatActivity() {
                 val majority = grouped.maxByOrNull { it.value.size }?.value?.firstOrNull()
 
                 if (majority != null) {
-                    // 多数決でスコアが確定したので UI 更新
                     updateScoreUi(majority)
-
-                    // ★ G/C・99・空欄チェックも含めて最終判定しつつ音を鳴らす
-                    //    - エラーがあれば NG 音
-                    //    - 問題なければ OK 音
                     recalculateScore(playSound = true)
 
                     guideOverlay.setDetected("green")
-                    // recalculateScore 内でエラーなら confirmButton が非表示になるので、
-                    // ここでは一旦表示だけしておき、最終状態は recalculateScore に任せる
                     confirmButton.visibility = View.VISIBLE
 
-                    // ※ ここでは playJudgeSound(true) を直接呼ばない
+                    // ★ OCR結果が画面に出た＝まだ保存してないので、次の自動発火を禁止
+                    hasUnSavedResult = true
+
                 } else {
                     guideOverlay.setDetected("red")
                     Toast.makeText(
@@ -1751,33 +1990,14 @@ class CameraActivity : AppCompatActivity() {
                         "⚠️ 判定一致せず：手動確認して修正してください",
                         Toast.LENGTH_LONG
                     ).show()
-                    // ★ 不一致は無条件で NG 音
                     playJudgeSound(false)
                     confirmButton.visibility = View.VISIBLE
+                    // ★ OCR結果が画面に出た＝まだ保存してないので、次の自動発火を禁止
+                    hasUnSavedResult = true
+
                 }
 
-
-                // 🔥 自動モード時のみカメラ完全停止！
-                if (!isManualCameraControl) {
-                    val cameraProvider = ProcessCameraProvider.getInstance(this).get()
-                    cameraProvider.unbindAll()
-                    camera = null
-                    imageCapture = null
-                    isCameraReady = false
-
-                    // 🔥 プレビューを完全OFF
-                    previewView.visibility = View.GONE
-                    previewView.alpha = 0f
-                    previewView.setBackgroundColor(Color.BLACK)
-
-                    guideOverlay.visibility = View.GONE
-                    findViewById<FrameLayout>(R.id.previewContainer)
-                        .setBackgroundColor(Color.BLACK)
-
-                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
-                    Log.d("CAMERA", "📴 OCR完了後にカメラ自動停止")
-                }
+                finishOcrCycle("done")
 
                 return
             }
@@ -1790,35 +2010,88 @@ class CameraActivity : AppCompatActivity() {
                 ContextCompat.getMainExecutor(this),
                 object : ImageCapture.OnImageSavedCallback {
                     override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                        val bitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
-                        val rotated = rotateBitmap(bitmap, 90f)
-                        val cropped = Bitmap.createBitmap(
-                            rotated,
-                            OCR_RECT_PX.left,
-                            OCR_RECT_PX.top,
-                            OCR_RECT_PX.width(),
-                            OCR_RECT_PX.height()
-                        )
+                        try {
+                            val bitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
+                            val rotated = rotateBitmap(bitmap, 90f)
 
-                        recognizeText(cropped, rotated) { result ->
-                            result?.let { results.add(it) }
-                            takeNext(count + 1)
+                            val cropped = Bitmap.createBitmap(
+                                rotated,
+                                OCR_RECT_PX.left,
+                                OCR_RECT_PX.top,
+                                OCR_RECT_PX.width(),
+                                OCR_RECT_PX.height()
+                            )
+
+                            recognizeText(cropped, rotated) { result ->
+                                result?.let { results.add(it) }
+                                takeNext(count + 1)
+                            }
+
+                        } catch (e: Exception) {
+                            Log.e("OCR", "processing error", e)
+                            Toast.makeText(applicationContext, "処理エラー", Toast.LENGTH_SHORT).show()
+                            finishOcrCycle("processing error")
+                            stopCamera("processing error")
+                        } finally {
+                            try { photoFile.delete() } catch (_: Exception) {}
                         }
                     }
 
                     override fun onError(e: ImageCaptureException) {
-                        Toast.makeText(
-                            applicationContext,
-                            "撮影エラー",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        Log.e("OCR", "撮影エラー", e)
+                        Toast.makeText(applicationContext, "撮影エラー", Toast.LENGTH_SHORT).show()
+
+                        try { photoFile.delete() } catch (_: Exception) {}
+
+                        // OCR状態だけ解除（必須）
+                        finishOcrCycle("takePicture error")
+
+                        // 画面は黒へ戻すが、監視は継続
+                        returnToIdleView(reason = "takePicture error")
                     }
+
+
                 }
             )
         }
 
         takeNext(0)
     }
+
+
+    private fun stopCamera(reason: String = "") {
+        try {
+            val cameraProvider = ProcessCameraProvider.getInstance(this).get()
+            cameraProvider.unbindAll()
+        } catch (e: Exception) {
+            Log.e("CAMERA", "stopCamera failed", e)
+        }
+
+        camera = null
+        imageCapture = null
+        imageAnalysis = null
+        preview = null
+
+        isCameraReady = false
+        isMonitoring = false
+        isActiveView = false
+
+        previewView.visibility = View.GONE
+        previewView.alpha = 0f
+        previewView.setBackgroundColor(Color.BLACK)
+
+        guideOverlay.visibility = View.GONE
+        findViewById<FrameLayout>(R.id.previewContainer).setBackgroundColor(Color.BLACK)
+
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        autoDetector.reset("stopCamera")
+
+        Log.d("CAMERA", "📴 stopCamera: $reason")
+    }
+
+
+
 
 
 
@@ -2379,8 +2652,6 @@ class CameraActivity : AppCompatActivity() {
             // カメラ未起動なら起動→少し待ってから開始
             startCamera()
             isCameraReady = true
-            isManualCameraControl = false
-            Handler(Looper.getMainLooper()).postDelayed({ captureScoreOnlyMultiple() }, 300)
             return
         }
 
@@ -2409,22 +2680,7 @@ class CameraActivity : AppCompatActivity() {
 
 
 
-                // 自動モード時のみ停止（既存と同等）
-                if (!isManualCameraControl) {
-                    val cameraProvider = ProcessCameraProvider.getInstance(this).get()
-                    cameraProvider.unbindAll()
-                    camera = null
-                    imageCapture = null
-                    isCameraReady = false
 
-                    previewView.visibility = View.GONE
-                    previewView.alpha = 0f
-                    previewView.setBackgroundColor(Color.BLACK)
-                    guideOverlay.visibility = View.GONE
-                    findViewById<FrameLayout>(R.id.previewContainer).setBackgroundColor(Color.BLACK)
-                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    Log.d("CAMERA", "📴 手入力EntryNoからのスコア読取後に自動停止")
-                }
                 return
             }
 
