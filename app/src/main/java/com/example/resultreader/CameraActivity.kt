@@ -1786,6 +1786,7 @@ class CameraActivity : AppCompatActivity() {
 
 
 
+
             val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
             try {
