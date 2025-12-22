@@ -946,6 +946,7 @@ class CameraActivity : AppCompatActivity() {
                     startCamera()
 
 
+
                 Toast.makeText(
                     this,
                     "🤖 自動モードON：カードを赤枠に入れると連続で読み取ります",
