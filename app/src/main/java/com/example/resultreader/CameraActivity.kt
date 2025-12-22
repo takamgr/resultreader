@@ -2035,8 +2035,8 @@ class CameraActivity : AppCompatActivity() {
                         lastAvgLuma = avgLuma
                         lastWhiteRatio = whiteRatio
 
-// 最終トリガー条件（静止は短め）
-                        val isStableEnough = stableFrameCount >= 8
+// 最終トリガー条件（静止判定カウント
+                        val isStableEnough = stableFrameCount >= 20
 
 // ---- 静止白カード発火（ここだけ）----
                         if (isWhiteEnough && isBrightEnough && isStableEnough) {
