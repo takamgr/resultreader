@@ -2031,6 +2031,7 @@ class CameraActivity : AppCompatActivity() {
                             stableFrameCount = 0
                         }
 
+
 // 次フレーム比較用
                         lastAvgLuma = avgLuma
                         lastWhiteRatio = whiteRatio
