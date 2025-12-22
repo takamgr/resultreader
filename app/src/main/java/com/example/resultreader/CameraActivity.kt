@@ -62,6 +62,11 @@ import android.graphics.RectF
 
 
 class CameraActivity : AppCompatActivity() {
+
+
+
+    private lateinit var autoModeText: TextView
+
     // Preview UseCase を保持して、後で ON/OFF 切替できるようにする
     private var previewUseCase: Preview? = null
 
@@ -642,6 +647,10 @@ class CameraActivity : AppCompatActivity() {
         scorePreview = findViewById(R.id.scorePreview)
         previewView = findViewById(R.id.previewView)
 
+        autoModeText = findViewById(R.id.autoModeText)
+        updateAutoModeText()
+
+
 
 
         // 追加: 掲示用出力ボタンのクリックリスナー（R生成前の環境でも安全に動作するよう動的取得）
@@ -961,10 +970,12 @@ class CameraActivity : AppCompatActivity() {
 
                 Toast.makeText(this, "🛑 自動モードOFF", Toast.LENGTH_SHORT).show()
             }
-
-            // true を返して「長押しイベントを消費」しておく
+            updateAutoModeText()   // ← ここで必ず更新
             true
+
         }
+
+
 
 
 
@@ -2025,7 +2036,7 @@ class CameraActivity : AppCompatActivity() {
                         lastWhiteRatio = whiteRatio
 
 // 最終トリガー条件（静止は短め）
-                        val isStableEnough = stableFrameCount >= 2
+                        val isStableEnough = stableFrameCount >= 8
 
 // ---- 静止白カード発火（ここだけ）----
                         if (isWhiteEnough && isBrightEnough && isStableEnough) {
@@ -3589,6 +3600,11 @@ class CameraActivity : AppCompatActivity() {
         guideOverlay.setDetected("red")
         confirmButton.visibility = View.GONE
     }
+    private fun updateAutoModeText() {
+        val label = if (isAutoModeEnabled) "AUTO" else "MANUAL"
+        autoModeText.text = label
+    }
+
 
 
 }
