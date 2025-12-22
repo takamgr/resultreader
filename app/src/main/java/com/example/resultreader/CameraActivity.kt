@@ -943,9 +943,7 @@ class CameraActivity : AppCompatActivity() {
                 lastWhiteRatio = -1f
 
 
-                    startCamera()
-
-
+                startCamera()
 
                 Toast.makeText(
                     this,
