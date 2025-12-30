@@ -2008,7 +2008,6 @@ class CameraActivity : AppCompatActivity() {
 
 
 
-
                         // ---- 安定判定：AEの微振動でも溜まる方式（完成版・重複なし） ----
 
 // 先に「カードがあるっぽい」条件
