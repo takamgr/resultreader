@@ -76,50 +76,50 @@ class CameraActivity : AppCompatActivity() {
 
 
 
-    private lateinit var autoModeText: TextView
+    internal lateinit var autoModeText: TextView
 
     // Preview UseCase を保持して、後で ON/OFF 切替できるようにする
-    private var previewUseCase: Preview? = null
+    internal var previewUseCase: Preview? = null
 
     // 自動モードの Preview 表示状態（true = 表示中 / false = 消灯）
-    private var isPreviewVisibleInAutoMode = true
+    internal var isPreviewVisibleInAutoMode = true
 
-    private val inactivityTimeout = 10000L  // ← 5秒でスリープ
-    private val inactivityHandler = Handler(Looper.getMainLooper())
-    private var isCameraSuspended = false
+    internal val inactivityTimeout = 10000L  // ← 5秒でスリープ
+    internal val inactivityHandler = Handler(Looper.getMainLooper())
+    internal var isCameraSuspended = false
 
-    private var isManualCameraControl = false
-    private lateinit var guideToggleButton: ImageButton
+    internal var isManualCameraControl = false
+    internal lateinit var guideToggleButton: ImageButton
 
     // 手動ショット用：この撮影のためにカメラを起動したかどうか
-    private var startedCameraForManualShot: Boolean = false
+    internal var startedCameraForManualShot: Boolean = false
 
-    private var ocrSoundPlayed = false
+    internal var ocrSoundPlayed = false
 
-    private var isCameraReady: Boolean = false
-    private var entryMap: Map<Int, Pair<String, String>> = emptyMap()
+    internal var isCameraReady: Boolean = false
+    internal var entryMap: Map<Int, Pair<String, String>> = emptyMap()
 
-    private var imageCapture: ImageCapture? = null
-    private lateinit var cameraExecutor: ExecutorService
-    private var camera: Camera? = null
+    internal var imageCapture: ImageCapture? = null
+    internal lateinit var cameraExecutor: ExecutorService
+    internal var camera: Camera? = null
 
     // 連続自動読み取りモードかどうか
-    private var isAutoModeEnabled: Boolean = false
+    internal var isAutoModeEnabled: Boolean = false
 
     // ★ 手動撮影の「保留フラグ」
-    private var pendingManualCapture: Boolean = false
+    internal var pendingManualCapture: Boolean = false
 
 
     // 🔽 ここから自動静止白カードトリガー用の状態フラグ
-    private var imageAnalysis: ImageAnalysis? = null
-    private var autoCaptureArmed: Boolean = true      // 「次のカード待ち」状態かどうか
-    private var stableFrameCount: Int = 0             // 連続で「静止」と判定されたフレーム数
-    private var lastAvgLuma: Float = -1f              // 前フレームの平均輝度
-    private var lastWhiteRatio: Float = -1f           // 前フレームの白比率
+    internal var imageAnalysis: ImageAnalysis? = null
+    internal var autoCaptureArmed: Boolean = true      // 「次のカード待ち」状態かどうか
+    internal var stableFrameCount: Int = 0             // 連続で「静止」と判定されたフレーム数
+    internal var lastAvgLuma: Float = -1f              // 前フレームの平均輝度
+    internal var lastWhiteRatio: Float = -1f           // 前フレームの白比率
     // 🔼 ここまで追加
 
     // 🔴 カード赤枠の絶対領域（仕様書と合わせる）
-    private val CARD_RECT = RectF(
+    internal val CARD_RECT = RectF(
         0.125f, // left
         0.35f,  // top
         0.875f, // right
@@ -127,66 +127,66 @@ class CameraActivity : AppCompatActivity() {
     )
 
     // 🤖 自動白判定で見る「中央ミニ領域」の割合（カード枠に対する比率）
-    private val AUTO_CENTER_WIDTH_RATIO = 0.4f   // 横方向：中央40%だけ見る
-    private val AUTO_CENTER_HEIGHT_RATIO = 0.4f  // 縦方向：中央40%だけ見る
+    internal val AUTO_CENTER_WIDTH_RATIO = 0.4f   // 横方向：中央40%だけ見る
+    internal val AUTO_CENTER_HEIGHT_RATIO = 0.4f  // 縦方向：中央40%だけ見る
 
     // 自動モードで「OCR中だけプレビューを一時表示」したかどうか
-    private var autoTempPreviewShown: Boolean = false
+    internal var autoTempPreviewShown: Boolean = false
 
 
-    private var selectedPattern: TournamentPattern = TournamentPattern.PATTERN_4x2
-    private val OCR_LEFT = 445
-    private val OCR_TOP = 750
-    private val OCR_WIDTH = 280
-    private val OCR_HEIGHT = 220
-    private val OCR_RECT_PX = Rect(OCR_LEFT, OCR_TOP, OCR_LEFT + OCR_WIDTH, OCR_TOP + OCR_HEIGHT)
+    internal var selectedPattern: TournamentPattern = TournamentPattern.PATTERN_4x2
+    internal val OCR_LEFT = 445
+    internal val OCR_TOP = 750
+    internal val OCR_WIDTH = 280
+    internal val OCR_HEIGHT = 220
+    internal val OCR_RECT_PX = Rect(OCR_LEFT, OCR_TOP, OCR_LEFT + OCR_WIDTH, OCR_TOP + OCR_HEIGHT)
 
-    private var lastSavedCsvFile: File? = null
+    internal var lastSavedCsvFile: File? = null
 
-    private var currentSession: String = "AM"
+    internal var currentSession: String = "AM"
 
-    private lateinit var flashToggleButton: ImageButton
-    private lateinit var tournamentSettingButton: ImageButton  // ← Button から変更
+    internal lateinit var flashToggleButton: ImageButton
+    internal lateinit var tournamentSettingButton: ImageButton  // ← Button から変更
 
-    private lateinit var previewView: PreviewView
-    private lateinit var resultText: TextView
-    private lateinit var prepareButton: Button
-    private lateinit var confirmButton: Button
-    private lateinit var guideOverlay: GuideOverlayView
-    private lateinit var scorePreview: ImageView
-    private lateinit var tournamentInfoText: TextView
-
-
+    internal lateinit var previewView: PreviewView
+    internal lateinit var resultText: TextView
+    internal lateinit var prepareButton: Button
+    internal lateinit var confirmButton: Button
+    internal lateinit var guideOverlay: GuideOverlayView
+    internal lateinit var scorePreview: ImageView
+    internal lateinit var tournamentInfoText: TextView
 
 
-    private var isOcrRunning = false
 
-    private var isFlashOn = false
-    private var pendingSaveBitmap: Bitmap? = null
 
-    private lateinit var scoreLabelViews: List<TextView>
+    internal var isOcrRunning = false
+
+    internal var isFlashOn = false
+    internal var pendingSaveBitmap: Bitmap? = null
+
+    internal lateinit var scoreLabelViews: List<TextView>
 
     // 手入力でEntryNoが確定済みかどうかの簡易フラグ
-    private var manualEntryCommitted: Boolean = false
+    internal var manualEntryCommitted: Boolean = false
     // C案: OCRで直近にEntryNoが読めたか／画面にスコア解析結果があるか
-    private var lastOcrHadEntry: Boolean = false  // 直近のOCRでEntryNoが読めたか
-    private var hasScoreResult: Boolean = false   // 画面にスコア解析結果が出ているか
+    internal var lastOcrHadEntry: Boolean = false  // 直近のOCRでEntryNoが読めたか
+    internal var hasScoreResult: Boolean = false   // 画面にスコア解析結果が出ているか
     // 現在画面に表示されているエントリのクラス（UIで上書き可能）
-    private var currentRowClass: String? = null
+    internal var currentRowClass: String? = null
     // 判定音の再生抑止用タイムスタンプ（ミリ秒）
 
-    private var judgeSoundPool: android.media.SoundPool? = null
-    private var judgeSoundOkId: Int = 0
-    private var judgeSoundCheckId: Int = 0
-    private var judgeSoundsLoaded: Boolean = false
+    internal var judgeSoundPool: android.media.SoundPool? = null
+    internal var judgeSoundOkId: Int = 0
+    internal var judgeSoundCheckId: Int = 0
+    internal var judgeSoundsLoaded: Boolean = false
     // 個別ロード完了フラグ（SoundPool の各サンプルがロード済みか）
-    private var judgeOkLoaded: Boolean = false
-    private var judgeCheckLoaded: Boolean = false
+    internal var judgeOkLoaded: Boolean = false
+    internal var judgeCheckLoaded: Boolean = false
     // 直近に再生した判定（null=なし, true=OK, false=NG）を保持して同一状態の連続再生を抑止
-    private var lastJudgeState: Boolean? = null
+    internal var lastJudgeState: Boolean? = null
 
-    private var autoRawFrameCount = 0
-    private val entryListPickerLauncher =
+    internal var autoRawFrameCount = 0
+    internal val entryListPickerLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) {
                 copyCsvToAppStorage(uri)
@@ -194,6 +194,17 @@ class CameraActivity : AppCompatActivity() {
                 Toast.makeText(this, "ファイルが選択されませんでした", Toast.LENGTH_SHORT).show()
             }
         }
+    // 再生中フラグ（重複再生防止）＋最後に鳴らした時間
+    internal var isPlayingJudge: Boolean = false
+    internal var lastJudgePlayTime: Long = 0L
+
+    /**
+     * 自動静止白カード検知用の ImageAnalysis UseCase を構築する。
+     * ガイド枠付近（画面中央寄り）の Y 平面をざっくりサンプリングして、
+     * 「白っぽい紙が画面の大部分を占めていて、しばらく画面変化が小さい」
+     * となったら startOcrCapture() を自動で呼び出す。
+     */
+    internal var autoCardTickCount = 0
 
 
 
@@ -298,9 +309,7 @@ class CameraActivity : AppCompatActivity() {
          }
      }
 
-    // 再生中フラグ（重複再生防止）＋最後に鳴らした時間
-    private var isPlayingJudge: Boolean = false
-    private var lastJudgePlayTime: Long = 0L
+
 
     // ★ 判定音を鳴らす（true = 正解, false = 要確認）
     private fun playJudgeSound(isOk: Boolean) {
@@ -1886,13 +1895,7 @@ class CameraActivity : AppCompatActivity() {
         return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
     }
 
-    /**
-     * 自動静止白カード検知用の ImageAnalysis UseCase を構築する。
-     * ガイド枠付近（画面中央寄り）の Y 平面をざっくりサンプリングして、
-     * 「白っぽい紙が画面の大部分を占めていて、しばらく画面変化が小さい」
-     * となったら startOcrCapture() を自動で呼び出す。
-     */
-    private var autoCardTickCount = 0
+
 
     private fun buildAutoCardAnalysisUseCase(): ImageAnalysis {
         return ImageAnalysis.Builder()
@@ -2010,7 +2013,7 @@ class CameraActivity : AppCompatActivity() {
 
 // 先に「カードがあるっぽい」条件
                         val isWhiteEnough  = whiteRatio >= 0.35f
-                        val isBrightEnough = avgLuma    >=35f
+                        val isBrightEnough = avgLuma    >=65f
 
 
 // 安定判定の閾値（AEがフラフラしても通す）
@@ -3615,7 +3618,6 @@ class CameraActivity : AppCompatActivity() {
         val label = if (isAutoModeEnabled) "AUTO" else "MANUAL"
         autoModeText.text = label
     }
-
 
 
 }
