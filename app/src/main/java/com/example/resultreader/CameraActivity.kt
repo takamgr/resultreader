@@ -206,6 +206,9 @@ class CameraActivity : AppCompatActivity() {
      */
     internal var autoCardTickCount = 0
 
+    internal lateinit var entryProgressText: TextView
+
+
 
 
 
@@ -591,6 +594,7 @@ class CameraActivity : AppCompatActivity() {
         setContentView(R.layout.activity_camera)
 
         guideToggleButton = findViewById(R.id.guideToggleButton)  // ← これ忘れずに！
+        confirmButton = findViewById(R.id.confirmButton)
         entryMap = CsvUtils.loadEntryMapFromCsv(this)
 
         // 🔹撮影準備ボタン長押し → 保存ボタン長押し（DNF/DNSダイアログ）と同じ動作
@@ -654,6 +658,7 @@ class CameraActivity : AppCompatActivity() {
 
         resultText = findViewById(R.id.resultText)
         tournamentInfoText = findViewById(R.id.tournamentInfoText)
+
         // 追加: EntryNo を手入力で修正できるようにする
         resultText.setOnClickListener { showEntryNoEditDialog() }
         resultText.setOnLongClickListener { showEntryNoEditDialog(); true }
@@ -661,7 +666,7 @@ class CameraActivity : AppCompatActivity() {
         tournamentInfoText.setOnClickListener { showClassPickerDialog() }
         tournamentInfoText.setOnLongClickListener { showClassPickerDialog(); true }
         prepareButton = findViewById(R.id.prepareButton)
-        confirmButton = findViewById(R.id.confirmButton)
+
         flashToggleButton = findViewById(R.id.flashToggleButton)
         guideOverlay = findViewById(R.id.guideOverlay)
         scorePreview = findViewById(R.id.scorePreview)
@@ -669,6 +674,10 @@ class CameraActivity : AppCompatActivity() {
 
         autoModeText = findViewById(R.id.autoModeText)
         updateAutoModeText()
+        entryProgressText = findViewById(R.id.entryProgressText)
+
+
+
 
 
 
@@ -776,6 +785,7 @@ class CameraActivity : AppCompatActivity() {
                     .show()
 
                 tournamentInfoText.text = "${selectedPattern.patternCode} / $currentSession"
+                updateEntryProgressDisplay()
 
 
 
@@ -1778,6 +1788,9 @@ class CameraActivity : AppCompatActivity() {
                     status = statusStr
                 )
 
+                // ★追加：保存された人数で進捗更新（ユニーク）
+                updateEntryProgressDisplay()
+
                 // 8) UI 戻し＋保存ボタン隠し（既存）
                 guideOverlay.setDetected("red")
                 confirmButton.visibility = View.GONE
@@ -2770,6 +2783,7 @@ class CameraActivity : AppCompatActivity() {
                 }
 
                 tournamentInfoText.text = "${selectedPattern.patternCode} / $currentSession"
+                updateEntryProgressDisplay()
                 Toast.makeText(
                     this,
                     "設定: ${selectedPattern.name} [$currentSession]",
@@ -3617,6 +3631,19 @@ class CameraActivity : AppCompatActivity() {
         val label = if (isAutoModeEnabled) "AUTO" else "MANUAL"
         autoModeText.text = label
     }
+    private fun updateEntryProgressDisplay() {
+        if (!::entryProgressText.isInitialized) return
+
+        val p = EntryProgressCounter.calc(
+            context = this,
+            pattern = selectedPattern,
+            entryMap = entryMap
+        )
+
+        entryProgressText.text =
+            "AM ${p.amDone}/${p.totalEntries}（残${p.amRemain}）  PM ${p.pmDone}/${p.totalEntries}（残${p.pmRemain}）"
+    }
+
 
 
 }

@@ -19,35 +19,52 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
+        <!-- 大会情報（左上） -->
         <TextView
             android:id="@+id/tournamentInfoText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="-"
-        android:textColor="#FFFFFF"
-        android:background="#88000000"
-        android:textSize="14sp"
-        android:padding="6dp"
-        android:layout_gravity="top|start"
-        android:layout_margin="12dp"
-        android:elevation="10dp" />
-
-
-        <TextView
-            android:id="@+id/autoModeText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="MANUAL"
             android:textColor="#FFFFFF"
             android:background="#88000000"
             android:textSize="14sp"
             android:padding="6dp"
             android:layout_gravity="top|start"
-            android:layout_marginStart="12dp"
-            android:layout_marginTop="48dp"
+            android:layout_margin="12dp"
+            android:elevation="10dp" />
+
+        <!-- AUTO/MANUAL表示（右上へ移動して1行を節約、ROIに被せない） -->
+        <TextView
+            android:id="@+id/autoModeText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="MANUAL"
+            android:textColor="#00FF00"
+            android:background="#88000000"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:padding="6dp"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="12dp"
+            android:layout_marginEnd="92dp"
             android:elevation="10dp" />
 
 
+        <!-- 提出数カウント表示（左上：大会情報の下。ROIに被せない） -->
+        <TextView
+            android:id="@+id/entryProgressText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="AM 0/0  PM 0/0"
+            android:textColor="#FFFFFF"
+            android:background="#88000000"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:padding="6dp"
+            android:layout_gravity="top|start"
+            android:layout_marginStart="12dp"
+            android:layout_marginTop="48dp"
+            android:elevation="10dp" />
 
         <!-- カメラプレビュー -->
         <androidx.camera.view.PreviewView
@@ -70,10 +87,6 @@
             android:paddingStart="4dp"
             android:paddingEnd="4dp"
             android:gravity="center">
-
-
-
-
 
             <ImageButton
                 android:id="@+id/flashToggleButton"
@@ -111,6 +124,7 @@
                 app:tint="#FFFFFF"
                 android:background="@android:color/transparent"
                 android:contentDescription="設定" />
+
             <Space
                 android:layout_width="0dp"
                 android:layout_height="0dp"
@@ -125,29 +139,19 @@
                 android:background="@android:color/transparent"
                 android:contentDescription="EntryList読み込み" />
 
-
-
             <Space
                 android:layout_width="0dp"
                 android:layout_height="0dp"
                 android:layout_weight="1" />
 
-
-
             <ImageButton
                 android:id="@+id/openCsvImageButton"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="CSVファイルを開く"
                 android:src="@drawable/ic_file"
                 app:tint="@android:color/white" />
-
-
-
-
-
         </LinearLayout>
 
         <!-- スコア画像プレビュー -->
@@ -186,10 +190,10 @@
             <TextView android:id="@+id/scoreLabel11" style="@style/ScoreLabelStyle"/>
             <TextView android:id="@+id/scoreLabel12" style="@style/ScoreLabelStyle"/>
         </LinearLayout>
+
     </FrameLayout>
 
-
-    <!-- 赤枠と黒枠 -->
+    <!-- 赤枠と黒枠（Copilot Guard: 絶対領域を変更しない） -->
     <com.example.resultreader.GuideOverlayView
         android:id="@+id/guideOverlay"
         android:layout_width="325dp"
@@ -313,11 +317,5 @@
 
         </LinearLayout>
     </LinearLayout>
-
-
-
-
-
-
 
 </androidx.constraintlayout.widget.ConstraintLayout>
