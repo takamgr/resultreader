@@ -2781,7 +2781,6 @@ class CameraActivity : AppCompatActivity() {
 
                     apply()
                 }
-
                 tournamentInfoText.text = "${selectedPattern.patternCode} / $currentSession"
                 updateEntryProgressDisplay()
                 Toast.makeText(
