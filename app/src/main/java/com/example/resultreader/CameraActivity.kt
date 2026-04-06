@@ -117,6 +117,7 @@ class CameraActivity : AppCompatActivity() {
     private var currentRowClass: String? = null
     private lateinit var soundManager: SoundManager
     private lateinit var resultChecker: ResultChecker
+    private lateinit var csvFileManager: CsvFileManager
     private val entryListPickerLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) {
@@ -380,6 +381,7 @@ class CameraActivity : AppCompatActivity() {
 
         soundManager = SoundManager(this)
         resultChecker = ResultChecker(this)
+        csvFileManager = CsvFileManager(this)
 
         guideToggleButton = findViewById(R.id.guideToggleButton)  // ← これ忘れずに！
         entryMap = CsvUtils.loadEntryMapFromCsv(this)
@@ -543,78 +545,7 @@ class CameraActivity : AppCompatActivity() {
 
         val openCsvImageButton = findViewById<ImageButton>(R.id.openCsvImageButton)
         openCsvImageButton.setOnClickListener {
-            val csvDir = getExternalFilesDir("ResultReader")
-            val csvFiles = csvDir?.listFiles { file -> file.extension == "csv" } ?: emptyArray()
-
-            if (csvFiles.isEmpty()) {
-                Toast.makeText(this, "保存されたCSVが見つかりません", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-
-            val fileNames = csvFiles.map { it.name }
-
-            val builder = AlertDialog.Builder(this)
-            builder.setTitle("CSVファイル一覧")
-
-            val adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, fileNames)
-
-            builder.setAdapter(adapter) { _, which ->
-                // タップ → 開く
-                openCsvFile(csvFiles[which])
-            }
-
-            val dialog = builder.create()
-
-            dialog.setOnShowListener {
-                dialog.listView.setOnItemLongClickListener { _, _, position, _ ->
-                    val fileTarget = csvFiles[position]
-                    val items = arrayOf("開く", "ダウンロードへコピー", "共有", "削除", "キャンセル")
-
-                    AlertDialog.Builder(this)
-                        .setTitle(fileTarget.name)
-                        .setItems(items) { d, which ->
-                             when (which) {
-                                 0 -> { // 開く
-                                     openCsvFile(fileTarget)
-                                 }
-                                 1 -> { // ダウンロードへコピー
-                                     val uri = copyToDownloads(fileTarget)
-                                     if (uri != null) {
-                                         Toast.makeText(this, "📂 ダウンロードにコピーしました\n${fileTarget.name}", Toast.LENGTH_LONG).show()
-                                     } else {
-                                         Toast.makeText(this, "コピーに失敗しました", Toast.LENGTH_SHORT).show()
-                                     }
-                                 }
-                                 2 -> { // 共有
-                                     shareCsvFile(fileTarget)
-                                 }
-                                 3 -> { // 削除（既存仕様を維持）
-                                     AlertDialog.Builder(this)
-                                         .setTitle("削除確認")
-                                         .setMessage("「${fileTarget.name}」を削除しますか？")
-                                         .setPositiveButton("削除") { _, _ ->
-                                             if (fileTarget.delete()) {
-                                                 Toast.makeText(this, "削除しました", Toast.LENGTH_SHORT).show()
-                                                 // 一覧更新
-                                                 findViewById<ImageButton>(R.id.openCsvImageButton).performClick()
-                                             } else {
-                                                 Toast.makeText(this, "削除に失敗しました", Toast.LENGTH_SHORT).show()
-                                             }
-                                             dialog.dismiss()
-                                         }
-                                         .setNegativeButton("キャンセル", null)
-                                         .show()
-                                 }
-                                 else -> d.dismiss()
-                             }
-                         }
-                        .show()
-
-                    true
-                }
-            }
-
-            dialog.show()
+            csvFileManager.showCsvListDialog()
         }
 
 
@@ -774,60 +705,14 @@ class CameraActivity : AppCompatActivity() {
         }
 
         // --- 追記: 右上のCSVボタン候補を探索し、長押しで出力メニューを表示 ---
-        fun setupExportLongPress(anchor: View) {
-            val popup = PopupMenu(this, anchor)
-
-            popup.menu.add(0, 3, 2, "CSVを保存")
-            // Canvasベースの安定版PDF出力を追加
-            popup.menu.add(0, 5, 3, "PDFを保存（Canvas）")
-            // optional: popup.menu.add(0, 4, 3, "PDFを開く/印刷")
-
-            popup.setOnMenuItemClickListener { item ->
-                 when (item.itemId) {
-                    1 -> {
-                        // S1版CSV（HTML path removed; keep S1 CSV)
-                        PrintableExporter.exportS1CsvToDownloads(this, selectedPattern)
-                        true
-                    }
-                    2 -> {
-
-                        // Canvas unified PDF (per-class single page behavior folded into unified renderer)
-                        PrintableExporter.exportPrintablePdfStyledSplitByClass(this, selectedPattern, rowsPerPage = 20)
-                        true
-                    }
-
-
-
-                    5 -> {
-                        // Canvas PDF with per-row thin lines enabled for visual verification
-                        PrintableExporter.exportPrintablePdfStyledSplitByClass(this, selectedPattern, rowsPerPage = 20)
-                        true
-                    }
-
-                    3 -> {
-                        PrintableExporter.exportS1CsvToDownloads(this, selectedPattern)
-                        true
-                    }
-                    4 -> {
-                        // legacy: map to unified Canvas exporter
-                        PrintableExporter.exportPrintablePdfStyledSplitByClass(this, selectedPattern, rowsPerPage = 20)
-                        true
-                    }
-                     else -> false
-                 }
-             }
-
-            popup.show()
-        }
-
-            val candidateIds = listOf("openCsvImageButton", "openCsvButton", "csvOpenButton", "resultCsvButton")
+        val candidateIds = listOf("openCsvImageButton", "openCsvButton", "csvOpenButton", "resultCsvButton")
         val anchorView = candidateIds
             .map { resources.getIdentifier(it, "id", packageName) }
             .mapNotNull { findViewById<View?>(it) }
             .firstOrNull()
 
         anchorView?.setOnLongClickListener {
-            setupExportLongPress(it)
+            csvFileManager.showExportPopupMenu(it, selectedPattern)
             true
         }
     }
@@ -1627,74 +1512,6 @@ class CameraActivity : AppCompatActivity() {
 
         }
     }
-    private fun openCsvFile(file: File) {
-        val uri = FileProvider.getUriForFile(
-            this,
-            "com.example.resultreader.fileprovider", // ← 固定authority
-            file
-        )
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "text/csv")
-            flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
-        }
-        try {
-            startActivity(intent)
-        } catch (e: Exception) {
-            Toast.makeText(this, "CSVを開くアプリが見つかりません", Toast.LENGTH_SHORT).show()
-        }
-
-
-
-
-    }
-
-    // ヘルパー: Downloads にコピー（API29+ は MediaStore、旧API は直接コピー）
-    private fun copyToDownloads(src: File): Uri? {
-        return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val resolver = contentResolver
-                val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-                val values = ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, src.name)
-                    put(MediaStore.Downloads.MIME_TYPE, "text/csv")
-                    put(MediaStore.Downloads.IS_PENDING, 1)
-                }
-                val uri = resolver.insert(collection, values) ?: return null
-                resolver.openOutputStream(uri)?.use { out ->
-                    src.inputStream().use { it.copyTo(out) }
-                }
-                values.clear()
-                values.put(MediaStore.Downloads.IS_PENDING, 0)
-                resolver.update(uri, values, null, null)
-                uri
-            } else {
-                val destDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                if (!destDir.exists()) destDir.mkdirs()
-                val dest = File(destDir, src.name)
-                src.copyTo(dest, overwrite = true)
-                Uri.fromFile(dest)
-            }
-        } catch (e: Exception) {
-            Log.e("EXPORT", "Downloadコピー失敗: ${src.name}", e)
-            null
-        }
-    }
-
-    // ヘルパー: CSV を共有
-    private fun shareCsvFile(file: File) {
-        val uri = FileProvider.getUriForFile(
-            this,
-            "com.example.resultreader.fileprovider",
-            file
-        )
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/csv"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        startActivity(Intent.createChooser(intent, "CSVを共有"))
-    }
-
     // エントリNo 手入力ダイアログ
     private fun showEntryNoEditDialog() {
         val currentNo = resultText.text.toString().replace(Regex("[^0-9]"), "")
