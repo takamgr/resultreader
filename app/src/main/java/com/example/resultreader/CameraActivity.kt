@@ -118,6 +118,7 @@ class CameraActivity : AppCompatActivity() {
     private lateinit var cameraManager: CameraManager
     private lateinit var tournamentManager: TournamentManager
     private lateinit var ocrProcessor: OcrProcessor
+    private lateinit var scoreManager: ScoreManager
     private val entryListPickerLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) {
@@ -136,65 +137,6 @@ class CameraActivity : AppCompatActivity() {
 
 
 
-    private fun recalculateScore() {
-        var totalScore = 0
-        var cleanCount = 0
-        var hasError = false
-
-        val totalCount = when (selectedPattern) {
-            TournamentPattern.PATTERN_4x2 -> 8
-            TournamentPattern.PATTERN_4x3 -> 12
-            TournamentPattern.PATTERN_5x2 -> 10
-        }
-
-        for ((index, label) in scoreLabelViews.withIndex()) {
-            var scoreText = label.text.toString().trim()
-
-            // 🔥 設定外の位置にスコアがある → 強制99
-            if (index >= totalCount && scoreText in listOf("0", "1", "2", "3", "5")) {
-                scoreText = "99"
-                label.text = "99"
-                label.setBackgroundResource(R.drawable.bg_score_unknown)
-            }
-
-            // ✅ 有効範囲に99・空欄・ダッシュなど → エラー
-            if (index < totalCount && scoreText in listOf("", "-", "ー", "―", "99")) {
-                hasError = true
-            }
-
-            Log.d("SAVE_CHECK", "ラベル $index = \"$scoreText\"")
-
-            when (scoreText) {
-                "0" -> cleanCount++
-                "1" -> totalScore += 1
-                "2" -> totalScore += 2
-                "3" -> totalScore += 3
-                "5" -> totalScore += 5
-            }
-        }
-
-        val pointText = findViewById<TextView>(R.id.scorePointText)
-        val cleanText = findViewById<TextView>(R.id.scoreCleanText)
-
-        if (hasError) {
-            pointText.text = "G:　-"
-            cleanText.text = "C:　-"
-            confirmButton.visibility = View.GONE
-            guideOverlay.setDetected("yellow")
-            Toast.makeText(this, "⚠️ スコアに空欄やエラー（99など）が含まれています", Toast.LENGTH_SHORT).show()
-
-            // ★ 要確認音を1回だけ鳴らす
-            soundManager.playJudgeSound(false)
-        } else {
-            pointText.text = "G:　$totalScore"
-            cleanText.text = "C:　$cleanCount"
-            confirmButton.visibility = View.VISIBLE
-            guideOverlay.setDetected("green")
-
-            // ★ 正解音を1回だけ鳴らす
-            soundManager.playJudgeSound(true)
-        }
-    }
 
 
 
@@ -206,32 +148,6 @@ class CameraActivity : AppCompatActivity() {
     }
 
 
-    private fun showScoreInputDialog(targetLabel: TextView) {
-        val options = arrayOf("0", "1", "2", "3", "5", "-")
-
-        val builder = AlertDialog.Builder(this)
-        builder.setTitle("スコアを選択してください")
-        builder.setItems(options) { _, which ->
-            val selected = options[which]
-            targetLabel.text = selected
-
-            val entryNoLabel: TextView = findViewById(R.id.resultText)
-            entryNoLabel.setBackgroundColor(Color.parseColor("#FFE599"))
-
-            when (selected) {
-                "0" -> targetLabel.setBackgroundResource(R.drawable.bg_score_clean)
-                "1", "2", "3", "5" -> targetLabel.setBackgroundResource(R.drawable.bg_score_deduction)
-                "-" -> targetLabel.setBackgroundResource(R.drawable.bg_score_blank)
-            }
-
-            // 🔥ここでスコア再計算を明示的に実行！
-            recalculateScore()
-
-            Toast.makeText(this, "※ 手入力でスコアを修正しました", Toast.LENGTH_SHORT).show()
-        }
-        builder.setNegativeButton("キャンセル", null)
-        builder.show()
-    }
 
 
 
@@ -310,7 +226,7 @@ class CameraActivity : AppCompatActivity() {
         // スコアラベルにクリックリスナーを設定（手入力対応）
         scoreLabelViews.forEach { label ->
             label.setOnClickListener {
-                showScoreInputDialog(label)
+                scoreManager.showScoreInputDialog(label)
             }
         }
 
@@ -328,6 +244,20 @@ class CameraActivity : AppCompatActivity() {
         guideOverlay = findViewById(R.id.guideOverlay)
         scorePreview = findViewById(R.id.scorePreview)
         previewView = findViewById(R.id.previewView)
+
+        scoreManager = ScoreManager(
+            context = this,
+            scoreLabelViews = scoreLabelViews,
+            resultText = resultText,
+            scorePreview = scorePreview,
+            guideOverlay = guideOverlay,
+            confirmButton = confirmButton,
+            getSelectedPattern = { selectedPattern },
+            onPlayJudgeSound = { ok -> soundManager.playJudgeSound(ok) },
+            onSetHasScoreResult = { hasScoreResult = it },
+            onSetLastOcrHadEntry = { lastOcrHadEntry = it },
+            onSetPendingBitmap = { pendingSaveBitmap = it }
+        )
 
         cameraManager = CameraManager(
             context = this,
@@ -368,7 +298,7 @@ class CameraActivity : AppCompatActivity() {
             getSelectedPattern = { selectedPattern },
             getCurrentSession = { currentSession },
             getCurrentRowClass = { currentRowClass },
-            onUpdateScoreUi = { updateScoreUi(it) },
+            onUpdateScoreUi = { scoreManager.updateScoreUi(it) },
             onPlayErrorSound = { soundManager.playJudgeSound(false) },
             onCameraStop = { camera = null; imageCapture = null; isCameraReady = false },
             onStartCamera = { cameraManager.startCamera(); isCameraReady = true; isManualCameraControl = false },
@@ -525,7 +455,7 @@ class CameraActivity : AppCompatActivity() {
             confirmButton = confirmButton,
             onPlayErrorSound = { soundManager.playJudgeSound(false) },
             onSaveImage = { saveImage(it) },
-            onClearRecognitionUi = { clearRecognitionUi() },
+            onClearRecognitionUi = { scoreManager.clearRecognitionUi() },
             onClassCleared = { currentRowClass = null },
             onTournamentInfoUpdate = { tournamentManager.updateTournamentInfoText() }
         )
@@ -723,45 +653,6 @@ class CameraActivity : AppCompatActivity() {
 
 
 
-    private fun updateScoreUi(result: ScoreAnalyzer.ScoreResult) {
-        // スコアが適用された → 画面に解析結果あり
-        hasScoreResult = true
-        val activeCount = when (selectedPattern) {
-            TournamentPattern.PATTERN_4x2 -> 8
-            TournamentPattern.PATTERN_4x3 -> 12
-            TournamentPattern.PATTERN_5x2 -> 10
-        }
-
-        findViewById<TextView>(R.id.scorePointText).text = "G:　${result.totalScore}"
-        findViewById<TextView>(R.id.scoreCleanText).text = "C:　${result.cleanCount}"
-        resultText.setBackgroundColor(Color.WHITE)
-
-        result.sectionScores.forEachIndexed { index, score ->
-            val label = scoreLabelViews.getOrNull(index)
-
-            if (label != null) {
-                // 👇 地獄回避ロジック：使うセクション内で空欄 = 99強制
-                val safeScore = when {
-                    index >= activeCount && score != null -> 99                     // 設定外にスコア → 99
-                    index < activeCount && score == null -> 99                     // 設定内に空欄 → 打ち忘れ → 99
-                    else -> score                                                  // 通常通り
-                }
-
-                label.text = safeScore?.toString() ?: ""
-
-                when (safeScore) {
-                    null -> label.setBackgroundResource(R.drawable.bg_score_blank)
-                    0 -> label.setBackgroundResource(R.drawable.bg_score_clean)
-                    in listOf(1, 2, 3, 5) -> label.setBackgroundResource(R.drawable.bg_score_deduction)
-                    99 -> label.setBackgroundResource(R.drawable.bg_score_unknown) // 99専用背景
-                    else -> label.setBackgroundResource(R.drawable.bg_score_unknown)
-                }
-            }
-        }
-
-        // ✅ OCR反映後に封鎖チェック（Phase1）
-        recalculateScore()
-    }
 
 
     companion object {
@@ -788,34 +679,6 @@ class CameraActivity : AppCompatActivity() {
     // クラス編集ダイアログ（Prefs の大会種別に応じた選択肢）
 
     // 認識結果を安全に初期化（UIのみ）
-    private fun clearRecognitionUi() {
-        // スコアラベルを空に＆背景リセット
-        scoreLabelViews.forEach { label ->
-            label.text = ""
-            label.setBackgroundResource(R.drawable.bg_score_blank)
-        }
-
-        // 合計表示クリア
-        findViewById<TextView>(R.id.scorePointText).text = "G:　-"
-        findViewById<TextView>(R.id.scoreCleanText).text = "C:　-"
-
-        // エントリー番号表示クリア
-        resultText.text = "No: -"
-        resultText.setBackgroundColor(Color.TRANSPARENT)
-
-        // プレビュー画像クリア
-        scorePreview.setImageDrawable(null)
-        scorePreview.visibility = View.GONE
-
-        // 状態フラグと一時画像をクリア
-        hasScoreResult = false
-        lastOcrHadEntry = false
-        pendingSaveBitmap = null
-
-        // 枠は待機（赤）に戻す & 保存ボタンは隠す
-        guideOverlay.setDetected("red")
-        confirmButton.visibility = View.GONE
-    }
 
 
 }
