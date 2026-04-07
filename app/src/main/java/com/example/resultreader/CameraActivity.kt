@@ -91,6 +91,7 @@ class CameraActivity : AppCompatActivity() {
     private lateinit var guideOverlay: GuideOverlayView
     private lateinit var scorePreview: ImageView
     private lateinit var tournamentInfoText: TextView
+    internal lateinit var entryProgressText: TextView
 
 
 
@@ -232,6 +233,7 @@ class CameraActivity : AppCompatActivity() {
 
         resultText = findViewById(R.id.resultText)
         tournamentInfoText = findViewById(R.id.tournamentInfoText)
+        entryProgressText = findViewById(R.id.entryProgressText)
         // 追加: EntryNo を手入力で修正できるようにする
         resultText.setOnClickListener { tournamentManager.showEntryNoEditDialog(entryMap, lastOcrHadEntry, hasScoreResult) }
         resultText.setOnLongClickListener { tournamentManager.showEntryNoEditDialog(entryMap, lastOcrHadEntry, hasScoreResult); true }
@@ -361,8 +363,7 @@ class CameraActivity : AppCompatActivity() {
                     apply()
                 }
                 tournamentInfoText.text = "${selectedPattern.patternCode} / $currentSession"
-
-
+                updateEntryProgressDisplay()
             }
         } else {
 
@@ -383,8 +384,7 @@ class CameraActivity : AppCompatActivity() {
                     .show()
 
                 tournamentInfoText.text = "${selectedPattern.patternCode} / $currentSession"
-
-
+                updateEntryProgressDisplay()
 
             } else {
                 Log.w("INIT", "⚠️ Saved session not found, defaulting to AM")
@@ -419,7 +419,9 @@ class CameraActivity : AppCompatActivity() {
 
         tournamentSettingButton = findViewById(R.id.tournamentSettingButton)
         tournamentSettingButton.setOnClickListener {
-            tournamentManager.showInitialTournamentSettingDialog(entryMap) {}
+            tournamentManager.showInitialTournamentSettingDialog(entryMap) {
+                updateEntryProgressDisplay()
+            }
         }
 
 
@@ -457,7 +459,7 @@ class CameraActivity : AppCompatActivity() {
             onSaveImage = { saveImage(it) },
             onClearRecognitionUi = { scoreManager.clearRecognitionUi() },
             onClassCleared = { currentRowClass = null },
-            onTournamentInfoUpdate = { tournamentManager.updateTournamentInfoText() }
+            onTournamentInfoUpdate = { tournamentManager.updateTournamentInfoText(); updateEntryProgressDisplay() }
         )
         confirmButton.setOnClickListener {
             saveManager.requestSaveWithStatus(
@@ -631,6 +633,19 @@ class CameraActivity : AppCompatActivity() {
 
 
 
+
+    private fun updateEntryProgressDisplay() {
+        if (!::entryProgressText.isInitialized) return
+
+        val p = EntryProgressCounter.calc(
+            context = this,
+            pattern = selectedPattern,
+            entryMap = entryMap
+        )
+
+        entryProgressText.text =
+            "AM ${p.amDone}/${p.totalEntries}（残${p.amRemain}）  PM ${p.pmDone}/${p.totalEntries}（残${p.pmRemain}）"
+    }
 
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
         ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED
