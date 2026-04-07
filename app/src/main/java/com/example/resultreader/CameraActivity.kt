@@ -117,6 +117,7 @@ class CameraActivity : AppCompatActivity() {
     private lateinit var saveManager: SaveManager
     private lateinit var cameraManager: CameraManager
     private lateinit var tournamentManager: TournamentManager
+    private lateinit var ocrProcessor: OcrProcessor
     private val entryListPickerLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) {
@@ -349,7 +350,32 @@ class CameraActivity : AppCompatActivity() {
             onSessionChanged = { currentSession = it },
             onEntryMapUpdated = { entryMap = it },
             onClassChanged = { currentRowClass = it },
-            onCaptureScoreRequested = { captureScoreOnlyMultiple() }
+            onCaptureScoreRequested = { ocrProcessor.captureScoreOnlyMultiple() }
+        )
+
+        ocrProcessor = OcrProcessor(
+            context = this,
+            guideOverlay = guideOverlay,
+            confirmButton = confirmButton,
+            scorePreview = scorePreview,
+            resultText = resultText,
+            tournamentInfoText = tournamentInfoText,
+            previewView = previewView,
+            ocrRectPx = OCR_RECT_PX,
+            getImageCapture = { imageCapture },
+            getIsManualCameraControl = { isManualCameraControl },
+            getEntryMap = { entryMap },
+            getSelectedPattern = { selectedPattern },
+            getCurrentSession = { currentSession },
+            getCurrentRowClass = { currentRowClass },
+            onUpdateScoreUi = { updateScoreUi(it) },
+            onPlayErrorSound = { soundManager.playJudgeSound(false) },
+            onCameraStop = { camera = null; imageCapture = null; isCameraReady = false },
+            onStartCamera = { cameraManager.startCamera(); isCameraReady = true; isManualCameraControl = false },
+            onSetHasScoreResult = { hasScoreResult = it },
+            onSetLastOcrHadEntry = { lastOcrHadEntry = it },
+            onSetPendingBitmap = { pendingSaveBitmap = it },
+            onSetCurrentRowClass = { currentRowClass = it }
         )
 
         prepareButton.setOnLongClickListener {
@@ -487,7 +513,7 @@ class CameraActivity : AppCompatActivity() {
             guideOverlay.setDetected("red")
             confirmButton.visibility = View.GONE
             scorePreview.visibility = View.GONE
-            captureAndAnalyzeMultiple()
+            ocrProcessor.captureAndAnalyzeMultiple()
         }
 
         // 保存処理
@@ -686,193 +712,14 @@ class CameraActivity : AppCompatActivity() {
         soundManager.release()
     }
 
-    private fun rotateBitmap(source: Bitmap, degrees: Float): Bitmap {
-        val matrix = Matrix().apply { postRotate(degrees) }
-        return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
-    }
 
 
 
 
 
-    private fun captureAndAnalyzeMultiple() {
-        val currentImageCapture = imageCapture ?: return
-        val results = mutableListOf<ScoreAnalyzer.ScoreResult>()
-
-        fun takeNext(count: Int) {
-            if (count >= 3) {
-                val grouped = results.groupBy { it.sectionScores }
-                val majority = grouped.maxByOrNull { it.value.size }?.value?.firstOrNull()
-
-                if (majority != null) {
-                    updateScoreUi(majority)
-                    guideOverlay.setDetected("green")
-                    confirmButton.visibility = View.VISIBLE
-                } else {
-                    guideOverlay.setDetected("red")
-                    Toast.makeText(
-                        this,
-                        "⚠️ 判定一致せず：手動確認して修正してください",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    // エラー時はチェック音を鳴らす
-                    soundManager.playJudgeSound(false)
-                    confirmButton.visibility = View.VISIBLE
-                }
-
-                // 🔥 自動モード時のみカメラ完全停止！
-                if (!isManualCameraControl) {
-                    val cameraProvider = ProcessCameraProvider.getInstance(this).get()
-                    cameraProvider.unbindAll()
-                    camera = null
-                    imageCapture = null
-                    isCameraReady = false
-
-                    // 🔥 プレビューを完全OFF
-                    previewView.visibility = View.GONE
-                    previewView.alpha = 0f
-                    previewView.setBackgroundColor(Color.BLACK)
-
-                    guideOverlay.visibility = View.GONE
-                    findViewById<FrameLayout>(R.id.previewContainer)
-                        .setBackgroundColor(Color.BLACK)
-
-                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
-                    Log.d("CAMERA", "📴 OCR完了後にカメラ自動停止")
-                }
 
 
 
-                return
-            }
-
-            val photoFile = File.createTempFile("ocr_temp_$count", ".jpg", cacheDir)
-            val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
-
-            currentImageCapture.takePicture(
-                outputOptions,
-                ContextCompat.getMainExecutor(this),
-                object : ImageCapture.OnImageSavedCallback {
-                    override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                        val bitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
-                        val rotated = rotateBitmap(bitmap, 90f)
-                        val cropped = Bitmap.createBitmap(
-                            rotated,
-                            OCR_RECT_PX.left,
-                            OCR_RECT_PX.top,
-                            OCR_RECT_PX.width(),
-                            OCR_RECT_PX.height()
-                        )
-
-                        recognizeText(cropped, rotated) { result ->
-                            result?.let { results.add(it) }
-                            takeNext(count + 1)
-                        }
-                    }
-
-                    override fun onError(e: ImageCaptureException) {
-                        Toast.makeText(applicationContext, "撮影エラー", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            )
-        }
-
-        takeNext(0)
-
-
-}
-
-
-
-    private fun recognizeText(
-        bitmap: Bitmap,
-        fullImage: Bitmap,
-        callback: (ScoreAnalyzer.ScoreResult?) -> Unit
-    ) {
-        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-        val image = com.google.mlkit.vision.common.InputImage.fromBitmap(bitmap, 0)
-
-        recognizer.process(image)
-            .addOnSuccessListener { visionText ->
-                val rawText = visionText.text
-                val cleanText = rawText.replace(Regex("[^0-9]"), "").trim()
-                val entryNumber = cleanText.toIntOrNull()
-                val isWarningId = cleanText in listOf("6", "9", "06", "09", "60", "90", "69", "96")
-
-                if (entryNumber != null && entryNumber in 1..99) {
-                    // OCRで番号が読めた
-                    lastOcrHadEntry = true
-                    resultText.text = "No: $entryNumber"
-                    pendingSaveBitmap = fullImage
-
-                    if (isWarningId) {
-                        guideOverlay.setDetected("yellow")
-                        Toast.makeText(this, "⚠️ 誤認注意番号", Toast.LENGTH_SHORT).show()
-                    }
-
-                    // 🔥 登録確認とトースト表示（ここが今回の追加）
-                    val entry = entryMap[entryNumber]
-                    if (entry != null) {
-                        val (name, clazz) = entry
-                        Toast.makeText(this, "✅ $name さん [$clazz]", Toast.LENGTH_SHORT).show()
-                        // 現在行のクラスをセットして UI に反映
-                        currentRowClass = clazz
-                        // tournamentInfoText にクラスを追加表示（既存表示を壊さない）。ここではローカルprefsを使う
-                        val prefsLocal = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
-                        val typeLabel = if (prefsLocal.getString("tournamentType", "unknown") == "championship") "選手権" else "ビギナー"
-                        tournamentInfoText.text = "${selectedPattern.patternCode} / $currentSession / $typeLabel / ${currentRowClass ?: "-"}"
-                    } else {
-                        Toast.makeText(this, "⚠️ EntryNo=$entryNumber は未登録です", Toast.LENGTH_LONG).show()
-                        currentRowClass = null
-                    }
-
-                    val scoreX = 570
-                    val scoreY = 1030
-                    val scoreWidth = 990
-                    val scoreHeight = 400
-
-                    val scaleX = 1.67f
-                    val scaleY = 2.20f
-                    val bx = (scoreX * scaleX).toInt() - 540
-                    val by = (scoreY * scaleY).toInt() - 1160
-                    val bw = (scoreWidth * scaleX).toInt() + 380
-                    val bh = (scoreHeight * scaleY).toInt() - 70
-
-                    val roiOffsetX = 25
-                    val roiOffsetY = 50
-                    val rawScoreBitmap = Bitmap.createBitmap(
-                        fullImage,
-                        (bx + roiOffsetX).coerceIn(0, fullImage.width - bw),
-                        (by + roiOffsetY).coerceIn(0, fullImage.height - bh),
-                        bw,
-                        bh
-                    )
-
-                    val scoreBitmap = rawScoreBitmap.copy(Bitmap.Config.ARGB_8888, true)
-
-                    // ← マゼンタ罫線などのデバッグ描画
-                    showDebugScoreOnPreview(scoreBitmap)
-
-                    val result = ScoreAnalyzer.analyze(scoreBitmap)
-                    scorePreview.setImageBitmap(scoreBitmap)
-                    scorePreview.visibility = View.VISIBLE
-                    callback(result)
-                } else {
-                    // OCRで番号が読めなかった
-                    lastOcrHadEntry = false
-                    guideOverlay.setDetected("red")
-                    Toast.makeText(this, "認識エラー: $rawText", Toast.LENGTH_SHORT).show()
-                    callback(null)
-                }
-            }
-            .addOnFailureListener {
-                lastOcrHadEntry = false
-                guideOverlay.setDetected("red")
-                Toast.makeText(this, "OCR失敗", Toast.LENGTH_SHORT).show()
-                callback(null)
-            }
-    }
 
 
 
@@ -925,56 +772,6 @@ class CameraActivity : AppCompatActivity() {
 
 
 
-    private fun showDebugScoreOnPreview(bitmap: Bitmap) {
-        val canvas = Canvas(bitmap)
-
-        val paintGrid = Paint().apply {
-            color = Color.MAGENTA
-            strokeWidth = 12f
-            style = Paint.Style.STROKE
-            isAntiAlias = true
-        }
-
-        val paintRoi = Paint().apply {
-            color = Color.CYAN
-            strokeWidth = 3f
-            style = Paint.Style.STROKE
-            isAntiAlias = true
-        }
-
-        val rows = 5
-        val cols = 12
-        val cellWidth = bitmap.width / cols
-        val cellHeight = bitmap.height / rows
-
-        canvas.drawRect(0f, 0f, bitmap.width.toFloat(), bitmap.height.toFloat(), paintGrid)
-
-        for (row in 0..rows) {
-            val y = row * cellHeight.toFloat()
-            canvas.drawLine(0f, y, bitmap.width.toFloat(), y, paintGrid)
-        }
-
-        for (col in 0..cols) {
-            val x = col * cellWidth.toFloat()
-            canvas.drawLine(x, 0f, x, bitmap.height.toFloat(), paintGrid)
-        }
-
-        val roiSize = 58
-        for (row in 0 until rows) {
-            for (col in 0 until cols) {
-                val cx = col * cellWidth + cellWidth / 2
-                val cy = row * cellHeight + cellHeight / 2
-                val left = (cx - roiSize).toFloat()
-                val top = (cy - roiSize).toFloat()
-                val right = (cx + roiSize).toFloat()
-                val bottom = (cy + roiSize).toFloat()
-                canvas.drawRect(left, top, right, bottom, paintRoi)
-            }
-        }
-
-        scorePreview.setImageBitmap(bitmap)
-        scorePreview.visibility = View.VISIBLE
-    }
     // CameraActivity.kt にまるっと追加するコード
 // 大会設定のダイアログ（起動時表示 + 選択保持 + UI反映）
 
@@ -987,124 +784,6 @@ class CameraActivity : AppCompatActivity() {
     // エントリNo 手入力ダイアログ
 
     // 手入力確定時にスコアのみを撮影・解析してUI更新する（既存のOCR->スコア読み取りの挙動に合わせる）
-    private fun captureScoreOnlyMultiple() {
-        // スコア単体読取を開始するため、解析未済にリセット
-        hasScoreResult = false
-        val currentImageCapture = imageCapture
-        if (currentImageCapture == null) {
-            // カメラ未起動なら起動→少し待ってから開始
-            cameraManager.startCamera()
-            isCameraReady = true
-            isManualCameraControl = false
-            Handler(Looper.getMainLooper()).postDelayed({ captureScoreOnlyMultiple() }, 300)
-            return
-        }
-
-        val results = mutableListOf<ScoreAnalyzer.ScoreResult>()
-
-        fun takeNext(count: Int) {
-            if (count >= 3) {
-                val grouped = results.groupBy { it.sectionScores }
-                val majority = grouped.maxByOrNull { it.value.size }?.value?.firstOrNull()
-
-                if (majority != null) {
-                    updateScoreUi(majority)
-                    guideOverlay.setDetected("green")
-                    confirmButton.visibility = View.VISIBLE
-                } else {
-                    guideOverlay.setDetected("red")
-                    Toast.makeText(this, "⚠️ 判定一致せず：手動確認してください", Toast.LENGTH_LONG).show()
-                    // エラー時はチェック音を鳴らす
-                    soundManager.playJudgeSound(false)
-                    confirmButton.visibility = View.VISIBLE
-                }
-
-                // 自動モード時のみ停止（既存と同等）
-                if (!isManualCameraControl) {
-                    val cameraProvider = ProcessCameraProvider.getInstance(this).get()
-                    cameraProvider.unbindAll()
-                    camera = null
-                    imageCapture = null
-                    isCameraReady = false
-
-                    previewView.visibility = View.GONE
-                    previewView.alpha = 0f
-                    previewView.setBackgroundColor(Color.BLACK)
-                    guideOverlay.visibility = View.GONE
-                    findViewById<FrameLayout>(R.id.previewContainer).setBackgroundColor(Color.BLACK)
-                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    Log.d("CAMERA", "📴 手入力EntryNoからのスコア読取後に自動停止")
-                }
-                return
-            }
-
-            val photoFile = File.createTempFile("score_only_$count", ".jpg", cacheDir)
-            val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
-
-            currentImageCapture.takePicture(
-                outputOptions,
-                ContextCompat.getMainExecutor(this),
-                object : ImageCapture.OnImageSavedCallback {
-                    override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                        try {
-                            val bitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
-                            val rotated = rotateBitmap(bitmap, 90f)
-
-                            // pendingSaveBitmap を設定（保存時に使うため）
-                            pendingSaveBitmap = rotated
-
-                            // ▼ recognizeText() 内と同じROI計算をそのまま使用
-                            val scoreX = 570
-                            val scoreY = 1030
-                            val scoreWidth = 990
-                            val scoreHeight = 400
-                            val scaleX = 1.67f
-                            val scaleY = 2.20f
-                            val bx = (scoreX * scaleX).toInt() - 540
-                            val by = (scoreY * scaleY).toInt() - 1160
-                            val bw = (scoreWidth * scaleX).toInt() + 380
-                            val bh = (scoreHeight * scaleY).toInt() - 70
-                            val roiOffsetX = 25
-                            val roiOffsetY = 50
-
-                            val rawScoreBitmap = Bitmap.createBitmap(
-                                rotated,
-                                (bx + roiOffsetX).coerceIn(0, rotated.width - bw),
-                                (by + roiOffsetY).coerceIn(0, rotated.height - bh),
-                                bw,
-                                bh
-                            )
-                            val scoreBitmap = rawScoreBitmap.copy(Bitmap.Config.ARGB_8888, true)
-
-                            // デバッググリッド（既存と同等）
-                            showDebugScoreOnPreview(scoreBitmap)
-
-                            val result = ScoreAnalyzer.analyze(scoreBitmap)
-                            scorePreview.setImageBitmap(scoreBitmap)
-                            scorePreview.visibility = View.VISIBLE
-                            result?.let { results.add(it) }
-                        } catch (e: Exception) {
-                            Log.e("SCORE_ONLY", "スコア抽出失敗", e)
-                        } finally {
-                            takeNext(count + 1)
-                        }
-                    }
-
-                    override fun onError(e: ImageCaptureException) {
-                        Toast.makeText(applicationContext, "撮影エラー", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            )
-        }
-
-        // UI初期化（既存の startOcrCapture と揃える）
-        resultText.text = (resultText.text.takeIf { it.toString().contains(Regex("\\d")) } ?: "No: -")
-        guideOverlay.setDetected("red")
-        confirmButton.visibility = View.GONE
-        scorePreview.visibility = View.GONE
-
-        takeNext(0)
-    }
 
     // クラス編集ダイアログ（Prefs の大会種別に応じた選択肢）
 
