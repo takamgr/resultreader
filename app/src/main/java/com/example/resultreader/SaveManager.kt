@@ -27,7 +27,7 @@ class SaveManager(
     private val onTournamentInfoUpdate: () -> Unit
 ) {
 
-    internal enum class SaveStatus { NORMAL, DNF, DNS }
+    enum class SaveStatus { NORMAL, DNF, DNS }
 
     fun requestSaveWithStatus(
         status: SaveStatus,
