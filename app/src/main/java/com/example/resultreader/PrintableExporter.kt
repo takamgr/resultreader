@@ -1171,8 +1171,13 @@ object PrintableExporter {
                 pdf.finishPage(page)
             }
 
+            val mappedClazz = when (clazz) {
+                "オープン" -> "OPEN"
+                "ビギナー" -> "BEGINNER"
+                else -> clazz
+            }
             val safeName =
-                clazz.ifBlank { "ALL" }.replace("[^a-zA-Z0-9一-龠]".toRegex(), "_")
+                mappedClazz.ifBlank { "ALL" }.replace("[^a-zA-Z0-9一-龠]".toRegex(), "_")
             val fileName = "${safeName}_result_${pattern.patternCode}_${todayName()}.pdf"
 
             val bos = ByteArrayOutputStream()
