@@ -58,6 +58,24 @@ import android.view.ViewGroup
 
 class CameraActivity : AppCompatActivity() {
 
+    internal lateinit var autoModeText: TextView
+    internal var previewUseCase: Preview? = null
+    internal var isPreviewVisibleInAutoMode = true
+    internal var isAutoModeEnabled: Boolean = false
+    internal var pendingManualCapture: Boolean = false
+    internal var startedCameraForManualShot: Boolean = false
+    internal var ocrSoundPlayed = false
+    internal var imageAnalysis: ImageAnalysis? = null
+    internal var autoCaptureArmed: Boolean = true
+    internal var stableFrameCount: Int = 0
+    internal var lastAvgLuma: Float = -1f
+    internal var lastWhiteRatio: Float = -1f
+    internal var autoTempPreviewShown: Boolean = false
+    internal var autoCardTickCount: Int = 0
+    internal val CARD_RECT = RectF(0.125f, 0.35f, 0.875f, 0.85f)
+    internal val AUTO_CENTER_WIDTH_RATIO = 0.4f
+    internal val AUTO_CENTER_HEIGHT_RATIO = 0.4f
+
     private var isManualCameraControl = false
     private lateinit var guideToggleButton: ImageButton
 
@@ -180,31 +198,22 @@ class CameraActivity : AppCompatActivity() {
 
         guideToggleButton.setOnClickListener {
             if (!isCameraReady) {
-                cameraManager.startCamera()
-                isCameraReady = true
-                isManualCameraControl = true
-                Toast.makeText(this, "📷 手動でカメラ起動", Toast.LENGTH_SHORT).show()
-            } else {
-                val cameraProvider = ProcessCameraProvider.getInstance(this).get()
-                cameraProvider.unbindAll()
-                camera = null
-                imageCapture = null
-                isCameraReady = false
-                isManualCameraControl = false
-
-                // 🔥 表示を完全にOFF
-                previewView.visibility = View.GONE
-                previewView.alpha = 0f
-                previewView.setBackgroundColor(Color.BLACK)
-
-                guideOverlay.visibility = View.GONE
-                findViewById<FrameLayout>(R.id.previewContainer)
-                    .setBackgroundColor(Color.BLACK)
-
-                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
-                Toast.makeText(this, "📴 カメラ手動OFF", Toast.LENGTH_SHORT).show()
+                startCamera()
+                return@setOnClickListener
             }
+            if (isAutoModeEnabled) {
+                if (isPreviewVisibleInAutoMode) {
+                    hidePreviewOnly()
+                    Toast.makeText(this, "🔦 Preview OFF（自動モード）", Toast.LENGTH_SHORT).show()
+                } else {
+                    showPreviewOnly()
+                    Toast.makeText(this, "🔦 Preview ON（自動モード）", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                stopCameraAndPreview()
+                Toast.makeText(this, "📴 カメラOFF（手動）", Toast.LENGTH_SHORT).show()
+            }
+            window.decorView.setBackgroundColor(Color.BLACK)
         }
 
 
@@ -234,6 +243,8 @@ class CameraActivity : AppCompatActivity() {
         resultText = findViewById(R.id.resultText)
         tournamentInfoText = findViewById(R.id.tournamentInfoText)
         entryProgressText = findViewById(R.id.entryProgressText)
+        autoModeText = findViewById(R.id.autoModeText)
+        updateAutoModeText()
         // 追加: EntryNo を手入力で修正できるようにする
         resultText.setOnClickListener { tournamentManager.showEntryNoEditDialog(entryMap, lastOcrHadEntry, hasScoreResult) }
         resultText.setOnLongClickListener { tournamentManager.showEntryNoEditDialog(entryMap, lastOcrHadEntry, hasScoreResult); true }
@@ -295,25 +306,20 @@ class CameraActivity : AppCompatActivity() {
             previewView = previewView,
             ocrRectPx = OCR_RECT_PX,
             getImageCapture = { imageCapture },
-            getIsManualCameraControl = { isManualCameraControl },
+            getIsManualCameraControl = { isManualCameraControl || isAutoModeEnabled },
             getEntryMap = { entryMap },
             getSelectedPattern = { selectedPattern },
             getCurrentSession = { currentSession },
             getCurrentRowClass = { currentRowClass },
             onUpdateScoreUi = { scoreManager.updateScoreUi(it) },
             onPlayErrorSound = { soundManager.playJudgeSound(false) },
-            onCameraStop = { camera = null; imageCapture = null; isCameraReady = false },
-            onStartCamera = { cameraManager.startCamera(); isCameraReady = true; isManualCameraControl = false },
+            onCameraStop = { camera = null; imageCapture = null; imageAnalysis = null; isCameraReady = false },
+            onStartCamera = { startCamera() },
             onSetHasScoreResult = { hasScoreResult = it },
             onSetLastOcrHadEntry = { lastOcrHadEntry = it },
             onSetPendingBitmap = { pendingSaveBitmap = it },
             onSetCurrentRowClass = { currentRowClass = it }
         )
-
-        prepareButton.setOnLongClickListener {
-            confirmButton.performLongClick()
-            true
-        }
 
         // 追加: 掲示用出力ボタンのクリックリスナー（R生成前の環境でも安全に動作するよう動的取得）
         val exportS1ButtonId = resources.getIdentifier("exportS1Button", "id", packageName)
@@ -427,25 +433,45 @@ class CameraActivity : AppCompatActivity() {
 
         // 撮影準備
         prepareButton.setOnClickListener {
+            isAutoModeEnabled = false
+            isManualCameraControl = true
             if (!isCameraReady) {
-                cameraManager.startCamera()
-                isCameraReady = true
-                isManualCameraControl = false
-
-                Handler(Looper.getMainLooper()).postDelayed({
-                    startOcrCapture()
-                }, 300)
-                return@setOnClickListener
+                pendingManualCapture = true
+                startedCameraForManualShot = true
+                startCamera()
+            } else {
+                startedCameraForManualShot = false
+                startOcrCapture()
             }
+        }
 
-            startOcrCapture()
-
-
-            resultText.text = "認識中…"
-            guideOverlay.setDetected("red")
-            confirmButton.visibility = View.GONE
-            scorePreview.visibility = View.GONE
-            ocrProcessor.captureAndAnalyzeMultiple()
+        prepareButton.setOnLongClickListener {
+            isAutoModeEnabled = !isAutoModeEnabled
+            if (isAutoModeEnabled) {
+                isManualCameraControl = false
+                autoCaptureArmed = true
+                stableFrameCount = 0
+                lastAvgLuma = -1f
+                lastWhiteRatio = -1f
+                startCamera()
+                Toast.makeText(this, "🤖 自動モードON：カードを赤枠に入れると連続で読み取ります", Toast.LENGTH_SHORT).show()
+            } else {
+                val cameraProvider = ProcessCameraProvider.getInstance(this).get()
+                cameraProvider.unbindAll()
+                camera = null
+                imageCapture = null
+                imageAnalysis = null
+                isCameraReady = false
+                previewView.visibility = View.GONE
+                previewView.alpha = 0f
+                previewView.setBackgroundColor(Color.BLACK)
+                guideOverlay.visibility = View.GONE
+                findViewById<FrameLayout>(R.id.previewContainer).setBackgroundColor(Color.BLACK)
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                Toast.makeText(this, "🛑 自動モードOFF", Toast.LENGTH_SHORT).show()
+            }
+            updateAutoModeText()
+            true
         }
 
         // 保存処理
@@ -457,7 +483,15 @@ class CameraActivity : AppCompatActivity() {
             confirmButton = confirmButton,
             onPlayErrorSound = { soundManager.playJudgeSound(false) },
             onSaveImage = { saveImage(it) },
-            onClearRecognitionUi = { scoreManager.clearRecognitionUi() },
+            onClearRecognitionUi = {
+                scoreManager.clearRecognitionUi()
+                if (isAutoModeEnabled) {
+                    autoCaptureArmed = true
+                    stableFrameCount = 0
+                    lastAvgLuma = -1f
+                    lastWhiteRatio = -1f
+                }
+            },
             onClassCleared = { currentRowClass = null },
             onTournamentInfoUpdate = { tournamentManager.updateTournamentInfoText(); updateEntryProgressDisplay() }
         )
@@ -607,7 +641,7 @@ class CameraActivity : AppCompatActivity() {
 
         if (requestCode == REQUEST_CODE_PERMISSIONS) {
             if (allPermissionsGranted()) {
-                cameraManager.startCamera()
+                startCamera()
             } else {
                 Toast.makeText(this, "カメラパーミッションが必要です", Toast.LENGTH_SHORT).show()
                 finish()
@@ -669,6 +703,368 @@ class CameraActivity : AppCompatActivity() {
 
 
 
+
+    // ===== AUTO/MANUAL モード関連関数 =====
+
+    private fun startCamera() {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+
+        cameraProviderFuture.addListener({
+            val cameraProvider = cameraProviderFuture.get()
+
+            // Preview 用意
+            val preview = Preview.Builder().build()
+            previewUseCase = preview
+
+            // ImageCapture
+            imageCapture = ImageCapture.Builder()
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                .build()
+
+            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+            try {
+                cameraProvider.unbindAll()
+
+                if (isAutoModeEnabled) {
+                    // 🤖 自動モード：ImageAnalysis + Preview（表示は後でON/OFF）
+
+                    imageAnalysis = buildAutoCardAnalysisUseCase()
+
+                    camera = cameraProvider.bindToLifecycle(
+                        this,
+                        cameraSelector,
+                        preview,
+                        imageCapture,
+                        imageAnalysis
+                    )
+
+                    // 自動モードで Preview をどうスタートさせるか
+                    if (isPreviewVisibleInAutoMode) {
+                        preview.setSurfaceProvider(previewView.surfaceProvider)
+                        previewView.visibility = View.VISIBLE
+                    } else {
+                        preview.setSurfaceProvider(null)
+                        previewView.visibility = View.GONE
+                    }
+
+                    Toast.makeText(this, "🤖 自動モード（カメラON）", Toast.LENGTH_SHORT).show()
+
+                } else {
+                    // 🧑 手動モード：Preview + ImageCapture のみ
+                    imageAnalysis = null
+
+                    camera = cameraProvider.bindToLifecycle(
+                        this,
+                        cameraSelector,
+                        preview,
+                        imageCapture
+                    )
+
+                    // 手動モードは常にPreview表示
+                    preview.setSurfaceProvider(previewView.surfaceProvider)
+                    previewView.visibility = View.VISIBLE
+
+                    Toast.makeText(this, "📷 手動モード（カメラON）", Toast.LENGTH_SHORT).show()
+                }
+
+                previewView.alpha = 1f
+                previewView.setBackgroundColor(Color.TRANSPARENT)
+                guideOverlay.visibility = View.VISIBLE
+                findViewById<FrameLayout>(R.id.previewContainer)
+                    .setBackgroundColor(Color.TRANSPARENT)
+
+                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                isCameraReady = true
+
+                // 🔽 カメラ起動直後に、手動撮影が保留されていればここで実行
+                if (isManualCameraControl && !isAutoModeEnabled && pendingManualCapture) {
+                    pendingManualCapture = false
+                    startOcrCapture()
+                }
+
+            } catch (exc: Exception) {
+                Log.e("CAMERA", "❌ カメラ起動失敗", exc)
+            }
+
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun buildAutoCardAnalysisUseCase(): ImageAnalysis {
+        return ImageAnalysis.Builder()
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .build().also { analysis ->
+
+                analysis.setAnalyzer(cameraExecutor) { imageProxy ->
+                    autoCardTickCount++
+                    if (autoCardTickCount % 10 == 0) {
+                        Log.d("AutoCard", "tick armed=$autoCaptureArmed ocr=$isOcrRunning result=$hasScoreResult suspended=false")
+                    }
+
+
+                    try {
+                        // ---- GUARD（スリープは一旦無視する）----
+                        if (isOcrRunning || hasScoreResult || !autoCaptureArmed) {
+                            Log.d(
+                                "AutoCard",
+                                "GUARD ocr=$isOcrRunning result=$hasScoreResult armed=$autoCaptureArmed"
+                            )
+                            imageProxy.close()
+                            return@setAnalyzer
+                        }
+// ---- ここまで ----
+
+
+
+                        // アームされていないなら何もしない
+                        if (!autoCaptureArmed) {
+                            imageProxy.close()
+                            return@setAnalyzer
+                        }
+
+                        // 画面サイズ
+                        val width = imageProxy.width
+                        val height = imageProxy.height
+
+                        // 1) まずは赤枠（カード全体）の画素座標を求める
+                        val cardLeft = CARD_RECT.left * width
+                        val cardRight = CARD_RECT.right * width
+                        val cardTop = CARD_RECT.top * height
+                        val cardBottom = CARD_RECT.bottom * height
+
+                        val cardCenterX = (cardLeft + cardRight) / 2f
+                        val cardCenterY = (cardTop + cardBottom) / 2f
+                        val cardWidth = cardRight - cardLeft
+                        val cardHeight = cardBottom - cardTop
+
+                        // 2) その中の「中央ミニ領域」（中央40%×40%）をROIとして使う
+                        val miniWidth = cardWidth * AUTO_CENTER_WIDTH_RATIO
+                        val miniHeight = cardHeight * AUTO_CENTER_HEIGHT_RATIO
+
+                        val roiLeftF = cardCenterX - miniWidth / 2f
+                        val roiRightF = cardCenterX + miniWidth / 2f
+                        val roiTopF = cardCenterY - miniHeight / 2f
+                        val roiBottomF = cardCenterY + miniHeight / 2f
+
+                        val roiLeft = roiLeftF.toInt().coerceIn(0, width - 1)
+                        val roiRight = roiRightF.toInt().coerceIn(roiLeft + 1, width)
+                        val roiTop = roiTopF.toInt().coerceIn(0, height - 1)
+                        val roiBottom = roiBottomF.toInt().coerceIn(roiTop + 1, height)
+
+                        // Y平面取得（明るさ情報）
+                        val yPlane = imageProxy.planes[0]
+                        val buffer = yPlane.buffer
+                        val rowStride = yPlane.rowStride
+                        val pixelStride = yPlane.pixelStride
+
+                        buffer.rewind() // 念のため毎回先頭に戻す
+
+                        var sumLuma = 0f
+                        var whiteCount = 0
+                        var sampleCount = 0
+
+                        // すべてのピクセルを見ると重いので、適当に間引き
+                        val stepX = 8
+                        val stepY = 8
+                        val whiteThreshold = 170 // ちょっと低めにしておく
+
+                        for (y in roiTop until roiBottom step stepY) {
+                            val rowOffset = y * rowStride
+                            for (x in roiLeft until roiRight step stepX) {
+                                val index = rowOffset + x * pixelStride
+                                if (index >= buffer.limit()) continue
+
+                                val yValue = buffer.get(index).toInt() and 0xFF
+                                sumLuma += yValue
+                                if (yValue >= whiteThreshold) whiteCount++
+                                sampleCount++
+                            }
+                        }
+
+                        if (sampleCount == 0) {
+                            imageProxy.close()
+                            return@setAnalyzer
+                        }
+
+                        val avgLuma = sumLuma / sampleCount
+                        val whiteRatio = whiteCount.toFloat() / sampleCount
+
+                        // avgLuma / whiteRatio を出した直後に追加する（ここが"今の状態"を見る場所）
+                        if (autoCardTickCount % 10 == 0) { // 10フレームに1回で間引き
+                            Log.d(
+                                "AutoCard",
+                                "RAW avg=$avgLuma white=$whiteRatio " +
+                                        "stable=$stableFrameCount armed=$autoCaptureArmed " +
+                                        "ocr=$isOcrRunning result=$hasScoreResult suspended=false"
+                            )
+                        }
+
+
+
+                        // ---- 安定判定：AEの微振動でも溜まる方式（完成版・重複なし） ----
+
+// 先に「カードがあるっぽい」条件
+                        val isWhiteEnough  = whiteRatio >= 0.35f
+                        val isBrightEnough = avgLuma    >=65f
+
+
+// 安定判定の閾値（AEがフラフラしても通す）
+                        val lumaThr  = 15f
+                        val whiteThr = 0.35f
+
+// 「白い状態が続いているなら」stable を溜める
+                        if (isWhiteEnough && isBrightEnough) {
+
+
+                            if (lastAvgLuma < 0f || lastWhiteRatio < 0f) {
+                                // 初回は比較できないので 1 から開始
+                                stableFrameCount = 1
+                            } else {
+                                val lumaDiff  = kotlin.math.abs(avgLuma - lastAvgLuma)
+                                val whiteDiff = kotlin.math.abs(whiteRatio - lastWhiteRatio)
+
+                                if (lumaDiff < lumaThr && whiteDiff < whiteThr) {
+                                    stableFrameCount++
+                                } else {
+                                    // いきなり0に戻さず1に落とす（白い状態は維持してる前提）
+                                    stableFrameCount = 1
+                                }
+                            }
+
+                        } else {
+                            // 白いカードが居ないなら完全リセット
+                            stableFrameCount = 0
+                        }
+
+
+// 次フレーム比較用
+                        lastAvgLuma = avgLuma
+                        lastWhiteRatio = whiteRatio
+
+// 最終トリガー条件（静止判定カウント
+                        val isStableEnough = stableFrameCount >= 20
+
+// ---- 静止白カード発火（ここだけ）----
+                        if (isWhiteEnough && isBrightEnough && isStableEnough) {
+
+                            Log.d(
+                                "AutoCard",
+                                "✅ 静止白カード判定：avg=$avgLuma white=$whiteRatio stable=$stableFrameCount"
+                            )
+
+                            // 同じカードで何度も発火しないようにアーム解除
+                            autoCaptureArmed = false
+                            stableFrameCount = 0
+                            lastAvgLuma = -1f
+                            lastWhiteRatio = -1f
+
+                            runOnUiThread { startOcrCapture() }
+                        }
+// ---- ここまで ----
+
+
+
+                    } catch (e: Exception) {
+                        Log.e("AutoCard", "静止カード解析中にエラー", e)
+                    } finally {
+                        imageProxy.close()
+                    }
+                }
+            }
+    }
+
+    // ===== PATCH: OCR完了後の復帰処理を共通化 =====
+    private fun finishOcrAndRearm(reason: String) {
+        isOcrRunning = false
+
+        // 自動モード運用なら次カード待ちに戻す
+        if (isAutoModeEnabled && !isManualCameraControl) {
+            autoCaptureArmed = true
+            stableFrameCount = 0
+            lastAvgLuma = -1f
+            lastWhiteRatio = -1f
+        }
+
+        Log.d("AutoCard", "FINISH_OCR($reason) ocr=$isOcrRunning armed=$autoCaptureArmed")
+    }
+
+    // カメラとプレビューを完全に停止する共通処理
+    private fun stopCameraAndPreview() {
+        try {
+            val cameraProvider = ProcessCameraProvider.getInstance(this).get()
+            cameraProvider.unbindAll()
+        } catch (e: Exception) {
+            Log.e("CAMERA", "カメラ停止失敗", e)
+        }
+
+        camera = null
+        imageCapture = null
+        imageAnalysis = null
+        isCameraReady = false
+
+        previewView.visibility = View.GONE
+        previewView.alpha = 0f
+        previewView.setBackgroundColor(Color.BLACK)
+        guideOverlay.visibility = View.GONE
+        findViewById<FrameLayout>(R.id.previewContainer)
+            .setBackgroundColor(Color.BLACK)
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    // 🔦 Preview（画面表示）だけを OFF にする（自動モード専用）
+    private fun hidePreviewOnly() {
+        previewUseCase?.setSurfaceProvider(null)
+
+        // ★GONEだと背面の白が見えたり、復帰で破綻しやすいので INVISIBLE 推奨
+        previewView.visibility = View.INVISIBLE
+        previewView.alpha = 0f
+        previewView.setBackgroundColor(Color.BLACK)
+
+        // ★コンテナも黒で固定（白背景対策）
+        findViewById<FrameLayout>(R.id.previewContainer).setBackgroundColor(Color.BLACK)
+
+        // 枠色（赤/黄/緑）は見えるように残す
+        guideOverlay.visibility = View.VISIBLE
+
+        isPreviewVisibleInAutoMode = false
+    }
+
+    // 🔦 Preview を ON（画面を復帰）
+    private fun showPreviewOnly() {
+        previewUseCase?.setSurfaceProvider(previewView.surfaceProvider)
+
+        previewView.visibility = View.VISIBLE
+        previewView.alpha = 1f
+        previewView.setBackgroundColor(Color.TRANSPARENT)
+
+        findViewById<FrameLayout>(R.id.previewContainer).setBackgroundColor(Color.TRANSPARENT)
+        guideOverlay.visibility = View.VISIBLE
+
+        isPreviewVisibleInAutoMode = true
+    }
+
+    private fun armAutoCaptureForNextCard(reason: String) {
+        if (!isAutoModeEnabled) return
+
+        // 結果表示を解除して次カード待ちへ
+        hasScoreResult = false
+        isOcrRunning = false  // 念のため（OCR終了後に呼ぶ想定）
+
+        autoCaptureArmed = true
+        stableFrameCount = 0
+        lastAvgLuma = -1f
+        lastWhiteRatio = -1f
+
+        Log.d("AutoCard", "📷 次カード待ちに復帰：$reason (armed=$autoCaptureArmed result=$hasScoreResult)")
+    }
+
+    private fun updateAutoModeText() {
+        if (!::autoModeText.isInitialized) return
+        val label = if (isAutoModeEnabled) "AUTO" else "MANUAL"
+        autoModeText.text = label
+    }
+
+    // ===== AUTO/MANUAL モード関連関数ここまで =====
 
     companion object {
         private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)

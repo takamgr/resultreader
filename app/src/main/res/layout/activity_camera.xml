@@ -32,6 +32,37 @@
         android:layout_margin="12dp"
         android:elevation="10dp" />
 
+        <!-- AUTO/MANUAL表示（右上） -->
+        <TextView
+            android:id="@+id/autoModeText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="MANUAL"
+            android:textColor="#00FF00"
+            android:background="#88000000"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:padding="6dp"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="12dp"
+            android:layout_marginEnd="50dp"
+            android:elevation="10dp" />
+
+        <!-- 提出数カウント表示（左上：大会情報の下。ROIに被せない） -->
+        <TextView
+            android:id="@+id/entryProgressText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="AM 0/0  PM 0/0"
+            android:textColor="#FFFFFF"
+            android:background="#88000000"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:padding="6dp"
+            android:layout_gravity="top|start"
+            android:layout_marginStart="12dp"
+            android:layout_marginTop="48dp"
+            android:elevation="10dp" />
 
         <!-- カメラプレビュー -->
         <androidx.camera.view.PreviewView
