@@ -623,7 +623,7 @@ class CameraActivity : AppCompatActivity() {
         guideOverlay.setDetected("red")
         confirmButton.visibility = View.GONE
         scorePreview.visibility = View.GONE
-        captureAndAnalyzeMultiple()
+        ocrProcessor.captureAndAnalyzeMultiple()
     }
 
 
