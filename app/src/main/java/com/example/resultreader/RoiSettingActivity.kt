@@ -2,106 +2,117 @@ package com.example.resultreader
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
-import android.widget.Button
-import android.widget.EditText
-import android.widget.Toast
+import android.util.Log
+import android.view.View
+import android.widget.*
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.Preview
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
 import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import java.io.File
 
 class RoiSettingActivity : AppCompatActivity() {
 
     companion object {
-        private const val PREFS_NAME = "ResultReaderPrefs"
-        private const val KEY_LEFT     = "base_x"
-        private const val KEY_TOP      = "base_y"
-        private const val KEY_WIDTH    = "base_width"
-        private const val KEY_HEIGHT   = "base_height"
-        private const val KEY_ROTATION = "roi_rotation"
-        private const val KEY_DEVICE   = "roi_device"
+        private const val PREFS_NAME        = "ResultReaderPrefs"
+        private const val KEY_DEVICE_LIST   = "roi_device_list"
+        private const val KEY_ACTIVE_DEVICE = "roi_active_device"
 
-        private const val DEF_LEFT     = 436
-        private const val DEF_TOP      = 750
-        private const val DEF_WIDTH    = 2033
-        private const val DEF_HEIGHT   = 1229
-        private const val DEF_ROTATION = 90
+        private const val DEF_BASE_X     = 436
+        private const val DEF_BASE_Y     = 750
+        private const val DEF_BASE_WIDTH = 2033
+        private const val DEF_ROTATION   = 90
+
+        // ビジネスカード縦横比 91:55
+        private const val ASPECT = 55f / 91f
 
         private const val REQUEST_CAMERA = 201
-
-        // 縦横比（固定）：ビジネスカード標準 91:55
-        private const val ASPECT = 55f / 91f
     }
 
-    // UI
-    private lateinit var previewView: PreviewView
+    // ── UI ──────────────────────────────────────────────────────────────────
+    private lateinit var capturedImageView: ImageView
     private lateinit var roiOverlay: RoiOverlayView
+    private lateinit var hintLayout: View
+    private lateinit var captureButton: Button
+    private lateinit var activeDeviceLabel: TextView
+    private lateinit var deviceSpinner: Spinner
+    private lateinit var deleteDeviceButton: Button
+    private lateinit var deviceNameEdit: EditText
     private lateinit var editX: EditText
     private lateinit var editY: EditText
     private lateinit var editWidth: EditText
     private lateinit var editHeight: EditText
-    private lateinit var editDevice: EditText
-    private lateinit var btnSave: Button
     private lateinit var btn0: Button
     private lateinit var btn90: Button
     private lateinit var btn180: Button
     private lateinit var btn270: Button
+    private lateinit var btnSave: Button
 
-    // 現在の設定値（画像座標px）
-    private var currentLeft    = DEF_LEFT
-    private var currentTop     = DEF_TOP
-    private var currentWidth   = DEF_WIDTH
+    // ── 状態 ────────────────────────────────────────────────────────────────
+    private var capturedBitmap: Bitmap? = null
+
+    // fitCenter 変換パラメータ（撮影後に計算）
+    private var imgScale    = 1f
+    private var imgOffsetX  = 0f
+    private var imgOffsetY  = 0f
+
+    private var currentLeft     = DEF_BASE_X
+    private var currentTop      = DEF_BASE_Y
+    private var currentWidth    = DEF_BASE_WIDTH
     private var currentRotation = DEF_ROTATION
-    private var currentDevice  = ""
 
-    // EditText の変更ループ防止フラグ
     private var suppressTextChange = false
+    private var suppressSpinner    = false
 
-    // プレビューのスケール係数（イメージ座標 → View座標）
-    // previewView のサイズが確定してから計算する
-    private var scaleToView = 1f
+    private var deviceList = mutableListOf<String>()
 
+    // ── カメラ ───────────────────────────────────────────────────────────────
+    private var imageCapture: ImageCapture? = null
+
+    // ────────────────────────────────────────────────────────────────────────
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_roi_setting)
 
         bindViews()
-        loadPrefs()
+        loadDeviceList()
+        setupDeviceSpinner()
         setupRotationButtons()
         setupTextWatchers()
-        setupSaveButton()
+        setupButtons()
 
-        roiOverlay.onFrameChanged = { left, top, _ ->
-            // View座標 → 画像座標に変換してEditTextへ反映
-            val imgLeft = (left / scaleToView).toInt()
-            val imgTop  = (top  / scaleToView).toInt()
-            suppressTextChange = true
-            editX.setText(imgLeft.toString())
-            editY.setText(imgTop.toString())
-            suppressTextChange = false
-            currentLeft = imgLeft
-            currentTop  = imgTop
+        // オーバーレイドラッグ → 画像座標に変換してEditTextへ反映
+        roiOverlay.onFrameChanged = { left, top, width ->
+            if (capturedBitmap != null) {
+                val imgX = ((left  - imgOffsetX) / imgScale).toInt().coerceAtLeast(0)
+                val imgY = ((top   - imgOffsetY) / imgScale).toInt().coerceAtLeast(0)
+                val imgW = (width / imgScale).toInt().coerceAtLeast(1)
+                suppressTextChange = true
+                editX.setText(imgX.toString())
+                editY.setText(imgY.toString())
+                editWidth.setText(imgW.toString())
+                editHeight.setText(calcHeight(imgW).toString())
+                suppressTextChange = false
+                currentLeft  = imgX
+                currentTop   = imgY
+                currentWidth = imgW
+            }
         }
 
-        // previewView のサイズが確定したら枠をViewに反映
-        previewView.post {
-            recalcScale()
-            syncOverlayFromCurrent()
-        }
-
-        if (hasCameraPermission()) {
-            startCamera()
-        } else {
-            ActivityCompat.requestPermissions(
-                this, arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA
-            )
-        }
+        if (hasCameraPermission()) setupCamera()
+        else ActivityCompat.requestPermissions(
+            this, arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA
+        )
     }
 
     override fun onDestroy() {
@@ -115,47 +126,289 @@ class RoiSettingActivity : AppCompatActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_CAMERA &&
             grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
-        ) {
-            startCamera()
-        } else {
-            Toast.makeText(this, "カメラ権限が必要です", Toast.LENGTH_SHORT).show()
+        ) setupCamera()
+        else Toast.makeText(this, "カメラ権限が必要です", Toast.LENGTH_SHORT).show()
+    }
+
+    // ── private helpers ─────────────────────────────────────────────────────
+
+    private fun bindViews() {
+        capturedImageView   = findViewById(R.id.capturedImageView)
+        roiOverlay          = findViewById(R.id.roiOverlayView)
+        hintLayout          = findViewById(R.id.hintLayout)
+        captureButton       = findViewById(R.id.captureButton)
+        activeDeviceLabel   = findViewById(R.id.activeDeviceLabel)
+        deviceSpinner       = findViewById(R.id.deviceSpinner)
+        deleteDeviceButton  = findViewById(R.id.deleteDeviceButton)
+        deviceNameEdit      = findViewById(R.id.deviceNameEdit)
+        editX               = findViewById(R.id.roiEditX)
+        editY               = findViewById(R.id.roiEditY)
+        editWidth           = findViewById(R.id.roiEditWidth)
+        editHeight          = findViewById(R.id.roiEditHeight)
+        btn0                = findViewById(R.id.roiBtn0)
+        btn90               = findViewById(R.id.roiBtn90)
+        btn180              = findViewById(R.id.roiBtn180)
+        btn270              = findViewById(R.id.roiBtn270)
+        btnSave             = findViewById(R.id.roiSaveButton)
+    }
+
+    // ── デバイスリスト管理 ────────────────────────────────────────────────────
+
+    private fun loadDeviceList() {
+        val raw = prefs().getString(KEY_DEVICE_LIST, "") ?: ""
+        deviceList = raw.split(",").filter { it.isNotBlank() }.toMutableList()
+    }
+
+    private fun setupDeviceSpinner() {
+        refreshSpinner()
+
+        deviceSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                parent: AdapterView<*>?, view: View?, position: Int, id: Long
+            ) {
+                if (suppressSpinner) return
+                val name = deviceList.getOrNull(position) ?: return
+                suppressSpinner = true
+                deviceNameEdit.setText(name)
+                suppressSpinner = false
+                loadDeviceSettings(name)
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
+        // アクティブ機種を選択状態に
+        val active = prefs().getString(KEY_ACTIVE_DEVICE, "") ?: ""
+        updateActiveDeviceLabel(active)
+        val idx = deviceList.indexOf(active)
+        if (idx >= 0) {
+            suppressSpinner = true
+            deviceSpinner.setSelection(idx)
+            suppressSpinner = false
+            deviceNameEdit.setText(active)
+            loadDeviceSettings(active)
+        } else if (deviceList.isNotEmpty()) {
+            deviceNameEdit.setText(deviceList[0])
+            loadDeviceSettings(deviceList[0])
         }
     }
 
-    // ── private helpers ──────────────────────────────────────────────────────
-
-    private fun bindViews() {
-        previewView = findViewById(R.id.roiPreviewView)
-        roiOverlay  = findViewById(R.id.roiOverlayView)
-        editX       = findViewById(R.id.roiEditX)
-        editY       = findViewById(R.id.roiEditY)
-        editWidth   = findViewById(R.id.roiEditWidth)
-        editHeight  = findViewById(R.id.roiEditHeight)
-        editDevice  = findViewById(R.id.roiEditDevice)
-        btnSave     = findViewById(R.id.roiSaveButton)
-        btn0        = findViewById(R.id.roiBtn0)
-        btn90       = findViewById(R.id.roiBtn90)
-        btn180      = findViewById(R.id.roiBtn180)
-        btn270      = findViewById(R.id.roiBtn270)
+    private fun refreshSpinner() {
+        val adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_item, deviceList.toList()
+        )
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        suppressSpinner = true
+        deviceSpinner.adapter = adapter
+        suppressSpinner = false
     }
 
-    private fun loadPrefs() {
-        val p = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        currentLeft     = p.getInt(KEY_LEFT,     DEF_LEFT)
-        currentTop      = p.getInt(KEY_TOP,      DEF_TOP)
-        currentWidth    = p.getInt(KEY_WIDTH,    DEF_WIDTH)
-        currentRotation = p.getInt(KEY_ROTATION, DEF_ROTATION)
-        currentDevice   = p.getString(KEY_DEVICE, "") ?: ""
+    private fun loadDeviceSettings(device: String) {
+        val p = prefs()
+        currentLeft     = p.getInt("roi_${device}_base_x",     DEF_BASE_X)
+        currentTop      = p.getInt("roi_${device}_base_y",     DEF_BASE_Y)
+        currentWidth    = p.getInt("roi_${device}_base_width",  DEF_BASE_WIDTH)
+        currentRotation = p.getInt("roi_${device}_rotation",   DEF_ROTATION)
 
         suppressTextChange = true
         editX.setText(currentLeft.toString())
         editY.setText(currentTop.toString())
         editWidth.setText(currentWidth.toString())
         editHeight.setText(calcHeight(currentWidth).toString())
-        editDevice.setText(currentDevice)
         suppressTextChange = false
 
         updateRotationButtonHighlight()
+
+        // 画像表示中なら枠を更新
+        if (capturedBitmap != null) syncOverlayFromCurrent()
+    }
+
+    private fun saveDevice(deviceName: String) {
+        if (deviceName.isBlank()) {
+            Toast.makeText(this, "機種名を入力してください", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val h = calcHeight(currentWidth)
+        prefs().edit().apply {
+            putInt("roi_${deviceName}_base_x",     currentLeft)
+            putInt("roi_${deviceName}_base_y",     currentTop)
+            putInt("roi_${deviceName}_base_width",  currentWidth)
+            putInt("roi_${deviceName}_base_height", h)
+            putInt("roi_${deviceName}_rotation",   currentRotation)
+            putString(KEY_ACTIVE_DEVICE, deviceName)
+            if (!deviceList.contains(deviceName)) {
+                deviceList.add(deviceName)
+                putString(KEY_DEVICE_LIST, deviceList.joinToString(","))
+            }
+            apply()
+        }
+        Log.d("ROI_SAVE",
+            "保存: device=$deviceName  base_x=$currentLeft  base_y=$currentTop  base_width=$currentWidth  rotation=$currentRotation")
+        // 読み戻し確認
+        val p = prefs()
+        Log.d("ROI_SAVE",
+            "読み戻し: base_x=${p.getInt("roi_${deviceName}_base_x", -1)}  base_y=${p.getInt("roi_${deviceName}_base_y", -1)}  base_width=${p.getInt("roi_${deviceName}_base_width", -1)}")
+
+        refreshSpinner()
+        val idx = deviceList.indexOf(deviceName)
+        if (idx >= 0) {
+            suppressSpinner = true
+            deviceSpinner.setSelection(idx)
+            suppressSpinner = false
+        }
+        updateActiveDeviceLabel(deviceName)
+
+        Toast.makeText(this, "保存しました：$deviceName（使用中）", Toast.LENGTH_SHORT).show()
+        finish()
+    }
+
+    private fun deleteDevice(deviceName: String) {
+        if (deviceName.isBlank()) return
+        AlertDialog.Builder(this)
+            .setTitle("削除確認")
+            .setMessage("「$deviceName」の設定を削除しますか？")
+            .setPositiveButton("削除") { _, _ ->
+                deviceList.remove(deviceName)
+                prefs().edit().apply {
+                    remove("roi_${deviceName}_base_x")
+                    remove("roi_${deviceName}_base_y")
+                    remove("roi_${deviceName}_base_width")
+                    remove("roi_${deviceName}_base_height")
+                    remove("roi_${deviceName}_rotation")
+                    putString(KEY_DEVICE_LIST, deviceList.joinToString(","))
+                    val active = prefs().getString(KEY_ACTIVE_DEVICE, "")
+                    if (active == deviceName) remove(KEY_ACTIVE_DEVICE)
+                    apply()
+                }
+                refreshSpinner()
+                if (deviceList.isNotEmpty()) {
+                    deviceNameEdit.setText(deviceList[0])
+                    loadDeviceSettings(deviceList[0])
+                } else {
+                    deviceNameEdit.setText("")
+                }
+                updateActiveDeviceLabel(prefs().getString(KEY_ACTIVE_DEVICE, "") ?: "")
+                Toast.makeText(this, "「$deviceName」を削除しました", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("キャンセル", null)
+            .show()
+    }
+
+    private fun updateActiveDeviceLabel(active: String) {
+        activeDeviceLabel.text = if (active.isBlank()) "使用中: (未設定)" else "使用中: $active"
+    }
+
+    // ── カメラ・撮影 ──────────────────────────────────────────────────────────
+
+    private fun setupCamera() {
+        val future = ProcessCameraProvider.getInstance(this)
+        future.addListener({
+            val provider = future.get()
+            imageCapture = ImageCapture.Builder()
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                .build()
+            try {
+                provider.unbindAll()
+                // Preview なし（ImageCapture のみ）
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, imageCapture!!)
+            } catch (e: Exception) {
+                Toast.makeText(this, "カメラ起動失敗: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun takeTestShot() {
+        val ic = imageCapture ?: run {
+            Toast.makeText(this, "カメラ準備中です。しばらく待ってから再試行してください", Toast.LENGTH_SHORT).show()
+            return
+        }
+        captureButton.isEnabled = false
+        captureButton.text = "撮影中..."
+
+        val photoFile = File.createTempFile("roi_test", ".jpg", cacheDir)
+        val options = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+
+        ic.takePicture(options, ContextCompat.getMainExecutor(this),
+            object : ImageCapture.OnImageSavedCallback {
+                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                    val bmp = BitmapFactory.decodeFile(photoFile.absolutePath)
+                    val rotated = rotateBitmap(bmp, currentRotation.toFloat())
+                    capturedBitmap = rotated
+
+                    capturedImageView.setImageBitmap(rotated)
+                    hintLayout.visibility = View.GONE
+                    roiOverlay.visibility = View.VISIBLE
+
+                    // ImageView レイアウト確定後にスケール計算
+                    capturedImageView.post {
+                        computeDisplayTransform(rotated)
+                        syncOverlayFromCurrent()
+                        Log.d("ROI_SHOT",
+                            "撮影完了: imageSize=${rotated.width}x${rotated.height}  scale=$imgScale  offset=($imgOffsetX, $imgOffsetY)")
+                    }
+
+                    captureButton.isEnabled = true
+                    captureButton.text = "テスト撮影"
+                }
+
+                override fun onError(e: ImageCaptureException) {
+                    Toast.makeText(this@RoiSettingActivity, "撮影エラー: ${e.message}", Toast.LENGTH_SHORT).show()
+                    captureButton.isEnabled = true
+                    captureButton.text = "テスト撮影"
+                }
+            }
+        )
+    }
+
+    /**
+     * ImageView(fitCenter) が bitmap をどう表示しているかを計算する。
+     * 変換式: viewX = imgX * imgScale + imgOffsetX
+     *         imgX  = (viewX - imgOffsetX) / imgScale
+     */
+    private fun computeDisplayTransform(bitmap: Bitmap) {
+        val vw = capturedImageView.width.toFloat()
+        val vh = capturedImageView.height.toFloat()
+        val iw = bitmap.width.toFloat()
+        val ih = bitmap.height.toFloat()
+        if (vw <= 0 || vh <= 0 || iw <= 0 || ih <= 0) return
+
+        imgScale   = minOf(vw / iw, vh / ih)
+        imgOffsetX = (vw - iw * imgScale) / 2f
+        imgOffsetY = (vh - ih * imgScale) / 2f
+    }
+
+    /** 現在の画像座標値をオーバーレイ（View座標）に反映 */
+    private fun syncOverlayFromCurrent() {
+        val vLeft  = currentLeft  * imgScale + imgOffsetX
+        val vTop   = currentTop   * imgScale + imgOffsetY
+        val vWidth = currentWidth * imgScale
+        roiOverlay.updateFrameWidth(vWidth)
+        roiOverlay.setFramePosition(vLeft, vTop)
+    }
+
+    private fun rotateBitmap(source: Bitmap, degrees: Float): Bitmap {
+        if (degrees == 0f) return source
+        val matrix = Matrix().apply { postRotate(degrees) }
+        return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+    }
+
+    // ── UI セットアップ ────────────────────────────────────────────────────────
+
+    private fun setupButtons() {
+        captureButton.setOnClickListener { takeTestShot() }
+
+        btnSave.setOnClickListener {
+            saveDevice(deviceNameEdit.text.toString().trim())
+        }
+
+        deleteDeviceButton.setOnClickListener {
+            val idx = deviceSpinner.selectedItemPosition
+            val name = deviceList.getOrNull(idx) ?: ""
+            if (name.isBlank()) {
+                Toast.makeText(this, "削除する機種を選択してください", Toast.LENGTH_SHORT).show()
+            } else {
+                deleteDevice(name)
+            }
+        }
     }
 
     private fun setupRotationButtons() {
@@ -168,15 +421,14 @@ class RoiSettingActivity : AppCompatActivity() {
     }
 
     private fun updateRotationButtonHighlight() {
-        val selectedColor = getColor(android.R.color.holo_blue_dark)
-        val defaultColor  = getColor(android.R.color.darker_gray)
+        val selected = getColor(android.R.color.holo_blue_dark)
+        val default  = getColor(android.R.color.darker_gray)
         listOf(btn0 to 0, btn90 to 90, btn180 to 180, btn270 to 270).forEach { (btn, deg) ->
-            btn.setBackgroundColor(if (deg == currentRotation) selectedColor else defaultColor)
+            btn.setBackgroundColor(if (deg == currentRotation) selected else default)
         }
     }
 
     private fun setupTextWatchers() {
-        // X
         editX.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
@@ -184,10 +436,9 @@ class RoiSettingActivity : AppCompatActivity() {
                 if (suppressTextChange) return
                 val v = s?.toString()?.toIntOrNull() ?: return
                 currentLeft = v
-                syncOverlayFromCurrent()
+                if (capturedBitmap != null) syncOverlayFromCurrent()
             }
         })
-        // Y
         editY.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
@@ -195,10 +446,9 @@ class RoiSettingActivity : AppCompatActivity() {
                 if (suppressTextChange) return
                 val v = s?.toString()?.toIntOrNull() ?: return
                 currentTop = v
-                syncOverlayFromCurrent()
+                if (capturedBitmap != null) syncOverlayFromCurrent()
             }
         })
-        // Width → Height を自動計算
         editWidth.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
@@ -209,76 +459,18 @@ class RoiSettingActivity : AppCompatActivity() {
                 suppressTextChange = true
                 editHeight.setText(calcHeight(v).toString())
                 suppressTextChange = false
-                roiOverlay.updateFrameWidth(v * scaleToView)
-                roiOverlay.onFrameChanged?.invoke(
-                    roiOverlay.frameLeft, roiOverlay.frameTop, roiOverlay.frameWidth
-                )
+                if (capturedBitmap != null) syncOverlayFromCurrent()
             }
         })
     }
 
-    private fun setupSaveButton() {
-        btnSave.setOnClickListener {
-            val w = editWidth.text.toString().toIntOrNull() ?: currentWidth
-            val h = calcHeight(w)
-            val device = editDevice.text.toString().trim()
+    // ── ユーティリティ ─────────────────────────────────────────────────────────
 
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().apply {
-                putInt(KEY_LEFT,     currentLeft)
-                putInt(KEY_TOP,      currentTop)
-                putInt(KEY_WIDTH,    w)
-                putInt(KEY_HEIGHT,   h)
-                putInt(KEY_ROTATION, currentRotation)
-                putString(KEY_DEVICE, device)
-                apply()
-            }
-            Toast.makeText(
-                this,
-                "保存しました（${device.ifBlank { "機種名未入力" }}）",
-                Toast.LENGTH_SHORT
-            ).show()
-            finish()
-        }
-    }
-
-    private fun startCamera() {
-        val future = ProcessCameraProvider.getInstance(this)
-        future.addListener({
-            val provider = future.get()
-            val preview = Preview.Builder().build().also {
-                it.setSurfaceProvider(previewView.surfaceProvider)
-            }
-            try {
-                provider.unbindAll()
-                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview)
-            } catch (e: Exception) {
-                Toast.makeText(this, "カメラ起動失敗: ${e.message}", Toast.LENGTH_SHORT).show()
-            }
-        }, ContextCompat.getMainExecutor(this))
-    }
+    private fun calcHeight(width: Int): Int = (width * ASPECT).toInt()
 
     private fun hasCameraPermission() =
         ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
                 PackageManager.PERMISSION_GRANTED
 
-    /** 画像座標 → View座標のスケールを計算（previewView サイズ確定後に呼ぶ） */
-    private fun recalcScale() {
-        // 回転後の画像解像度をざっくり想定（縦持ち撮影 → 90度回転後は landscape）
-        // ここでは previewView の幅を基準に、roi_width のデフォルト画像幅(1080想定)でスケールする
-        // 実際には機種によって異なるが、調整画面なので目安でよい
-        val imageWidth = 4032f  // 回転後の想定幅（4K撮影時）
-        scaleToView = previewView.width.toFloat() / imageWidth
-        if (scaleToView <= 0f) scaleToView = 1f
-    }
-
-    /** currentLeft/Top/Width から roiOverlay の枠位置を更新 */
-    private fun syncOverlayFromCurrent() {
-        val vLeft  = currentLeft  * scaleToView
-        val vTop   = currentTop   * scaleToView
-        val vWidth = currentWidth * scaleToView
-        roiOverlay.updateFrameWidth(vWidth)
-        roiOverlay.setFramePosition(vLeft, vTop)
-    }
-
-    private fun calcHeight(width: Int): Int = (width * ASPECT).toInt()
+    private fun prefs() = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
 }

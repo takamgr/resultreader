@@ -187,6 +187,16 @@ class CameraActivity : AppCompatActivity() {
         resultChecker = ResultChecker(this)
         csvFileManager = CsvFileManager(this)
 
+        // 🔧 一時デバッグ用：base_x/base_y/base_width を強制的にデフォルト値で上書き
+        // 座標確認後に削除すること
+        getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE).edit().apply {
+            putInt("base_x", 436)
+            putInt("base_y", 750)
+            putInt("base_width", 2033)
+            apply()
+        }
+        android.util.Log.d("ROI_RESET", "base_x/base_y/base_width をデフォルト値にリセット: x=436 y=750 w=2033")
+
         guideToggleButton = findViewById(R.id.guideToggleButton)  // ← これ忘れずに！
         entryMap = CsvUtils.loadEntryMapFromCsv(this)
 
@@ -685,20 +695,77 @@ class CameraActivity : AppCompatActivity() {
             "AM ${p.amDone}/${p.totalEntries}（残${p.amRemain}）  PM ${p.pmDone}/${p.totalEntries}（残${p.pmRemain}）"
     }
 
-    private fun loadBaseX(): Int =
-        getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE).getInt("base_x", 436)
+    /** 現在アクティブな機種名を取得。未設定なら空文字 */
+    private fun activeDevice(): String =
+        getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
+            .getString("roi_active_device", "") ?: ""
 
-    private fun loadBaseY(): Int =
-        getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE).getInt("base_y", 750)
+    private fun loadBaseX(): Int {
+        val p = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
+        val dev = activeDevice()
+        return if (dev.isBlank()) p.getInt("base_x", 436)
+               else p.getInt("roi_${dev}_base_x", 436)
+    }
 
-    private fun loadBaseWidth(): Int =
-        getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE).getInt("base_width", 2033)
+    private fun loadBaseY(): Int {
+        val p = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
+        val dev = activeDevice()
+        return if (dev.isBlank()) p.getInt("base_y", 750)
+               else p.getInt("roi_${dev}_base_y", 750)
+    }
 
-    private fun loadRotation(): Float =
-        getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE).getInt("roi_rotation", 90).toFloat()
+    private fun loadBaseWidth(): Int {
+        val p = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
+        val dev = activeDevice()
+        return if (dev.isBlank()) p.getInt("base_width", 2033)
+               else p.getInt("roi_${dev}_base_width", 2033)
+    }
+
+    private fun loadRotation(): Float {
+        val p = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
+        val dev = activeDevice()
+        return if (dev.isBlank()) p.getInt("roi_rotation", 90).toFloat()
+               else p.getInt("roi_${dev}_rotation", 90).toFloat()
+    }
 
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
         ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // ROI設定画面から戻ったとき、最新の base_x/base_y/base_width/rotation を反映する。
+        // OcrProcessor の getBaseX 等はラムダなので次の撮影時に自動で再読み込みされるが、
+        // ここで明示的に再初期化することで確実に最新値を使う。
+        android.util.Log.d("ROI_RESUME",
+            "onResume: base_x=${loadBaseX()}  base_y=${loadBaseY()}  base_width=${loadBaseWidth()}  rotation=${loadRotation()}")
+        ocrProcessor = OcrProcessor(
+            context = this,
+            guideOverlay = guideOverlay,
+            confirmButton = confirmButton,
+            scorePreview = scorePreview,
+            resultText = resultText,
+            tournamentInfoText = tournamentInfoText,
+            previewView = previewView,
+            getBaseX = { loadBaseX() },
+            getBaseY = { loadBaseY() },
+            getBaseWidth = { loadBaseWidth() },
+            getRotationDegrees = { loadRotation() },
+            getImageCapture = { imageCapture },
+            getIsManualCameraControl = { isManualCameraControl || isAutoModeEnabled },
+            getEntryMap = { entryMap },
+            getSelectedPattern = { selectedPattern },
+            getCurrentSession = { currentSession },
+            getCurrentRowClass = { currentRowClass },
+            onUpdateScoreUi = { scoreManager.updateScoreUi(it) },
+            onPlayErrorSound = { soundManager.playJudgeSound(false) },
+            onCameraStop = { camera = null; imageCapture = null; imageAnalysis = null; isCameraReady = false },
+            onStartCamera = { startCamera() },
+            onSetHasScoreResult = { hasScoreResult = it },
+            onSetLastOcrHadEntry = { lastOcrHadEntry = it },
+            onSetPendingBitmap = { pendingSaveBitmap = it },
+            onSetCurrentRowClass = { currentRowClass = it }
+        )
     }
 
     override fun onDestroy() {

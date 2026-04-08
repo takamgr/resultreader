@@ -6,24 +6,43 @@
     android:orientation="vertical"
     android:background="#000000">
 
-    <!-- カメラプレビュー＋ROI枠オーバーレイ（画面の60%） -->
+    <!-- 撮影画像表示エリア（画面の60%） -->
     <FrameLayout
-        android:id="@+id/roiPreviewContainer"
+        android:id="@+id/imageContainer"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="6"
         android:background="#111111">
 
-        <androidx.camera.view.PreviewView
-            android:id="@+id/roiPreviewView"
+        <ImageView
+            android:id="@+id/capturedImageView"
             android:layout_width="match_parent"
-            android:layout_height="match_parent" />
+            android:layout_height="match_parent"
+            android:scaleType="fitCenter" />
 
-        <!-- ドラッグ可能な赤枠オーバーレイ（コードで生成） -->
+        <!-- ドラッグ可能な赤枠オーバーレイ（撮影後に表示） -->
         <com.example.resultreader.RoiOverlayView
             android:id="@+id/roiOverlayView"
             android:layout_width="match_parent"
-            android:layout_height="match_parent" />
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
+        <!-- 未撮影時のヒント表示 -->
+        <LinearLayout
+            android:id="@+id/hintLayout"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:gravity="center">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="「テスト撮影」を押すと画像が表示されます"
+                android:textColor="#888888"
+                android:textSize="13sp" />
+
+        </LinearLayout>
 
     </FrameLayout>
 
@@ -40,7 +59,84 @@
             android:orientation="vertical"
             android:padding="12dp">
 
-            <!-- 座標入力行：X・Y -->
+            <!-- テスト撮影ボタン -->
+            <Button
+                android:id="@+id/captureButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="テスト撮影"
+                android:textSize="15sp"
+                android:layout_marginBottom="10dp"
+                app:backgroundTint="#4CAF50"
+                android:textColor="#FFFFFF" />
+
+            <!-- 現在使用中の機種 -->
+            <TextView
+                android:id="@+id/activeDeviceLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="使用中: (未設定)"
+                android:textColor="#FFD700"
+                android:textSize="12sp"
+                android:layout_marginBottom="8dp" />
+
+            <!-- 機種選択 + 削除 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="保存済み機種"
+                android:textColor="#AAAAAA"
+                android:textSize="11sp"
+                android:layout_marginBottom="4dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="8dp">
+
+                <Spinner
+                    android:id="@+id/deviceSpinner"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="#333333" />
+
+                <Button
+                    android:id="@+id/deleteDeviceButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="削除"
+                    android:textSize="12sp"
+                    android:layout_marginStart="6dp"
+                    app:backgroundTint="#E53935"
+                    android:textColor="#FFFFFF" />
+
+            </LinearLayout>
+
+            <!-- 機種名入力 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="機種名（新規登録は新しい名前を入力）"
+                android:textColor="#AAAAAA"
+                android:textSize="11sp"
+                android:layout_marginBottom="4dp" />
+
+            <EditText
+                android:id="@+id/deviceNameEdit"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="text"
+                android:textColor="#FFFFFF"
+                android:background="#333333"
+                android:padding="6dp"
+                android:textSize="14sp"
+                android:hint="例: Pixel 7"
+                android:textColorHint="#666666"
+                android:layout_marginBottom="10dp" />
+
+            <!-- X / Y -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -57,7 +153,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="X (left)"
+                        android:text="X (left px)"
                         android:textColor="#AAAAAA"
                         android:textSize="11sp" />
 
@@ -81,7 +177,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Y (top)"
+                        android:text="Y (top px)"
                         android:textColor="#AAAAAA"
                         android:textSize="11sp" />
 
@@ -98,7 +194,7 @@
 
             </LinearLayout>
 
-            <!-- 座標入力行：Width・Height -->
+            <!-- Width / Height -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -157,7 +253,7 @@
 
             </LinearLayout>
 
-            <!-- 回転ボタン -->
+            <!-- 回転角度 -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -170,7 +266,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:layout_marginBottom="8dp">
+                android:layout_marginBottom="12dp">
 
                 <Button
                     android:id="@+id/roiBtn0"
@@ -209,34 +305,12 @@
 
             </LinearLayout>
 
-            <!-- 機種名入力 -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="機種名メモ"
-                android:textColor="#AAAAAA"
-                android:textSize="11sp"
-                android:layout_marginBottom="4dp" />
-
-            <EditText
-                android:id="@+id/roiEditDevice"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="text"
-                android:textColor="#FFFFFF"
-                android:background="#333333"
-                android:padding="6dp"
-                android:textSize="14sp"
-                android:hint="例: Pixel 7"
-                android:textColorHint="#666666"
-                android:layout_marginBottom="12dp" />
-
             <!-- 保存ボタン -->
             <Button
                 android:id="@+id/roiSaveButton"
                 android:layout_width="match_parent"
                 android:layout_height="48dp"
-                android:text="保存"
+                android:text="保存して使用"
                 android:textSize="16sp"
                 app:backgroundTint="#2196F3"
                 android:textColor="#FFFFFF" />
