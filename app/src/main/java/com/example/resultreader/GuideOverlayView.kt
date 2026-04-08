@@ -18,6 +18,9 @@ class GuideOverlayView @JvmOverloads constructor(
     private var statusColor: String = "red"
     private val roiRects = mutableListOf<RectF>()
 
+    /** 検出状態が変化したときに呼ばれるコールバック（"red" / "yellow" / "green"） */
+    var onStatusChanged: ((String) -> Unit)? = null
+
     // 🔧 赤枠だけの描画位置を調整したいときはここをいじる（左上に-値でズレる）
     private val DRAW_OFFSET_X = -0f
     private val DRAW_OFFSET_Y = -0f
@@ -61,6 +64,7 @@ class GuideOverlayView @JvmOverloads constructor(
             else -> Color.parseColor("#80FF0000") // 待機・失敗：赤
         }
         Log.d("GuideOverlay", "色変更: $statusColor")
+        onStatusChanged?.invoke(statusColor)
         invalidate()
     }
 
@@ -72,32 +76,8 @@ class GuideOverlayView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-
-        val shrinkRight = 100f
-        val left = 0f
-        val top = 0f
-        val right = width.toFloat() - shrinkRight
-        val bottom = height.toFloat()
-
-        // 背景（赤・緑・黄）
-        canvas.drawRect(left, top, right, bottom, fillPaint)
-        canvas.drawRect(left, top, right, bottom, redStrokePaint)
-
-        // 四隅マーカー
-        val len = 25f
-        canvas.drawLine(left, top, left + len, top, strokePaint)
-        canvas.drawLine(left, top, left, top + len, strokePaint)
-        canvas.drawLine(right, top, right - len, top, strokePaint)
-        canvas.drawLine(right, top, right, top + len, strokePaint)
-        canvas.drawLine(left, bottom, left + len, bottom, strokePaint)
-        canvas.drawLine(left, bottom, left, bottom - len, strokePaint)
-        canvas.drawLine(right, bottom, right - len, bottom, strokePaint)
-        canvas.drawLine(right, bottom, right, bottom - len, strokePaint)
-
-        // ROI（水色）
-        for (rect in roiRects) {
-            canvas.drawRect(rect, roiPaint)
-        }
+        // 赤枠・背景・四隅マーカーの描画は非表示。
+        // 状態管理（setDetected / onStatusChanged）は有効。
     }
 
 }

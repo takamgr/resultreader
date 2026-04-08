@@ -18,9 +18,6 @@ import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.io.File
-import java.io.FileOutputStream
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 class OcrProcessor(
@@ -127,26 +124,6 @@ class OcrProcessor(
 
         scorePreview.setImageBitmap(bitmap)
         scorePreview.visibility = View.VISIBLE
-
-        // 🔧 デバッグ用：スコアグリッド画像をDownloadsフォルダに保存
-        saveDebugBitmapToDownloads(bitmap, "score_grid")
-    }
-
-    private fun saveDebugBitmapToDownloads(bitmap: Bitmap, prefix: String) {
-        try {
-            val ts = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.getDefault()).format(Date())
-            val dir = android.os.Environment.getExternalStoragePublicDirectory(
-                android.os.Environment.DIRECTORY_DOWNLOADS
-            )
-            val file = File(dir, "debug_${prefix}_$ts.png")
-            FileOutputStream(file).use { out ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-            }
-            Log.d("ROI_DEBUG", "デバッグ画像保存: ${file.absolutePath}")
-            Toast.makeText(context, "DEBUG: ${file.name}", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Log.e("ROI_DEBUG", "デバッグ画像保存失敗", e)
-        }
     }
 
     private fun recognizeText(
@@ -258,8 +235,6 @@ class OcrProcessor(
                     override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                         val bitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
                         val rotated = rotateBitmap(bitmap, getRotationDegrees())
-                        // 🔧 デバッグ用：回転後フル画像を保存（座標確認用）
-                        saveDebugBitmapToDownloads(rotated, "full_ocr")
                         val rect = calcOcrRect()
                         val cropped = Bitmap.createBitmap(
                             rotated,
@@ -332,8 +307,6 @@ class OcrProcessor(
                         try {
                             val bitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
                             val rotated = rotateBitmap(bitmap, getRotationDegrees())
-                            // 🔧 デバッグ用：回転後フル画像を保存（座標確認用）
-                            saveDebugBitmapToDownloads(rotated, "full_score")
 
                             // pendingSaveBitmap を設定（保存時に使うため）
                             onSetPendingBitmap(rotated)
@@ -381,7 +354,6 @@ class OcrProcessor(
         val bx = getBaseX()
         val by = getBaseY()
         val bw = getBaseWidth()
-        Log.d("ROI_CALC", "calcOcrRect: baseX=$bx  baseY=$by  baseWidth=$bw")
         val left   = (bx + 0.0044f * bw).toInt()
         val top    = by
         val width  = (0.1377f * bw).toInt()
@@ -400,7 +372,6 @@ class OcrProcessor(
         val bx = getBaseX()
         val by = getBaseY()
         val bw = getBaseWidth()
-        Log.d("ROI_CALC", "calcScoreRoi: baseX=$bx  baseY=$by  baseWidth=$bw  imageSize=${fullImage.width}x${fullImage.height}")
         val left   = bx
         val top    = (by + 0.1997f * bw).toInt()
         val width  = bw

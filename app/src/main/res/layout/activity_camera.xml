@@ -179,15 +179,15 @@
         <LinearLayout
             android:id="@+id/scoreLabels"
             android:layout_width="match_parent"
-            android:layout_height="48dp"
+            android:layout_height="52dp"
             android:layout_gravity="bottom"
             android:translationY="-45dp"
             android:orientation="horizontal"
             android:gravity="center"
             android:visibility="visible"
             android:background="#AAFFFFFF"
-            android:paddingTop="2dp"
-            android:paddingBottom="2dp">
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp">
             <TextView android:id="@+id/scoreLabel1" style="@style/ScoreLabelStyle"/>
             <TextView android:id="@+id/scoreLabel2" style="@style/ScoreLabelStyle"/>
             <TextView android:id="@+id/scoreLabel3" style="@style/ScoreLabelStyle"/>
@@ -220,6 +220,7 @@
         android:layout_height="40dp"
         android:layout_marginStart="50dp"
         android:layout_marginTop="100dp"
+        android:visibility="gone"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 

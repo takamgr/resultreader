@@ -187,16 +187,6 @@ class CameraActivity : AppCompatActivity() {
         resultChecker = ResultChecker(this)
         csvFileManager = CsvFileManager(this)
 
-        // 🔧 一時デバッグ用：base_x/base_y/base_width を強制的にデフォルト値で上書き
-        // 座標確認後に削除すること
-        getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE).edit().apply {
-            putInt("base_x", 436)
-            putInt("base_y", 750)
-            putInt("base_width", 2033)
-            apply()
-        }
-        android.util.Log.d("ROI_RESET", "base_x/base_y/base_width をデフォルト値にリセット: x=436 y=750 w=2033")
-
         guideToggleButton = findViewById(R.id.guideToggleButton)  // ← これ忘れずに！
         entryMap = CsvUtils.loadEntryMapFromCsv(this)
 
@@ -267,6 +257,25 @@ class CameraActivity : AppCompatActivity() {
         guideOverlay = findViewById(R.id.guideOverlay)
         scorePreview = findViewById(R.id.scorePreview)
         previewView = findViewById(R.id.previewView)
+
+        // 検出状態変化 → autoModeText・scoreLabels の背景色を連動させる
+        val scoreLabelsContainer = findViewById<android.widget.LinearLayout>(R.id.scoreLabels)
+        guideOverlay.onStatusChanged = { status ->
+            val autoModeBg = when (status) {
+                "green"  -> android.graphics.Color.parseColor("#CC228822")
+                "yellow" -> android.graphics.Color.parseColor("#CCAA8800")
+                else     -> android.graphics.Color.parseColor("#CCCC2222")
+            }
+            // scoreLabels: 透過なし・ベタ塗り
+            val scoreBg = when (status) {
+                "green"  -> android.graphics.Color.parseColor("#4CAF50")
+                "yellow" -> android.graphics.Color.parseColor("#FFC107")
+                else     -> android.graphics.Color.parseColor("#F44336")
+            }
+            autoModeText.setBackgroundColor(autoModeBg)
+            autoModeText.setTextColor(android.graphics.Color.WHITE)
+            scoreLabelsContainer.setBackgroundColor(scoreBg)
+        }
 
         scoreManager = ScoreManager(
             context = this,
@@ -737,8 +746,6 @@ class CameraActivity : AppCompatActivity() {
         // ROI設定画面から戻ったとき、最新の base_x/base_y/base_width/rotation を反映する。
         // OcrProcessor の getBaseX 等はラムダなので次の撮影時に自動で再読み込みされるが、
         // ここで明示的に再初期化することで確実に最新値を使う。
-        android.util.Log.d("ROI_RESUME",
-            "onResume: base_x=${loadBaseX()}  base_y=${loadBaseY()}  base_width=${loadBaseWidth()}  rotation=${loadRotation()}")
         ocrProcessor = OcrProcessor(
             context = this,
             guideOverlay = guideOverlay,
@@ -1145,6 +1152,7 @@ class CameraActivity : AppCompatActivity() {
         if (!::autoModeText.isInitialized) return
         val label = if (isAutoModeEnabled) "AUTO" else "MANUAL"
         autoModeText.text = label
+        autoModeText.setTextColor(android.graphics.Color.WHITE)
     }
 
     // ===== AUTO/MANUAL モード関連関数ここまで =====

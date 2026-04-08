@@ -241,13 +241,6 @@ class RoiSettingActivity : AppCompatActivity() {
             }
             apply()
         }
-        Log.d("ROI_SAVE",
-            "保存: device=$deviceName  base_x=$currentLeft  base_y=$currentTop  base_width=$currentWidth  rotation=$currentRotation")
-        // 読み戻し確認
-        val p = prefs()
-        Log.d("ROI_SAVE",
-            "読み戻し: base_x=${p.getInt("roi_${deviceName}_base_x", -1)}  base_y=${p.getInt("roi_${deviceName}_base_y", -1)}  base_width=${p.getInt("roi_${deviceName}_base_width", -1)}")
-
         refreshSpinner()
         val idx = deviceList.indexOf(deviceName)
         if (idx >= 0) {
