@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#000000">
+
+    <!-- カメラプレビュー＋ROI枠オーバーレイ（画面の60%） -->
+    <FrameLayout
+        android:id="@+id/roiPreviewContainer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="6"
+        android:background="#111111">
+
+        <androidx.camera.view.PreviewView
+            android:id="@+id/roiPreviewView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- ドラッグ可能な赤枠オーバーレイ（コードで生成） -->
+        <com.example.resultreader.RoiOverlayView
+            android:id="@+id/roiOverlayView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+    </FrameLayout>
+
+    <!-- コントロールパネル（画面の40%） -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="4"
+        android:background="#1A1A1A">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="12dp">
+
+            <!-- 座標入力行：X・Y -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="8dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:layout_marginEnd="8dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="X (left)"
+                        android:textColor="#AAAAAA"
+                        android:textSize="11sp" />
+
+                    <EditText
+                        android:id="@+id/roiEditX"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"
+                        android:textColor="#FFFFFF"
+                        android:background="#333333"
+                        android:padding="6dp"
+                        android:textSize="14sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Y (top)"
+                        android:textColor="#AAAAAA"
+                        android:textSize="11sp" />
+
+                    <EditText
+                        android:id="@+id/roiEditY"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"
+                        android:textColor="#FFFFFF"
+                        android:background="#333333"
+                        android:padding="6dp"
+                        android:textSize="14sp" />
+                </LinearLayout>
+
+            </LinearLayout>
+
+            <!-- 座標入力行：Width・Height -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="8dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:layout_marginEnd="8dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Width (px)"
+                        android:textColor="#AAAAAA"
+                        android:textSize="11sp" />
+
+                    <EditText
+                        android:id="@+id/roiEditWidth"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"
+                        android:textColor="#FFFFFF"
+                        android:background="#333333"
+                        android:padding="6dp"
+                        android:textSize="14sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Height (auto)"
+                        android:textColor="#AAAAAA"
+                        android:textSize="11sp" />
+
+                    <EditText
+                        android:id="@+id/roiEditHeight"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"
+                        android:textColor="#888888"
+                        android:background="#222222"
+                        android:padding="6dp"
+                        android:textSize="14sp"
+                        android:enabled="false" />
+                </LinearLayout>
+
+            </LinearLayout>
+
+            <!-- 回転ボタン -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="回転角度"
+                android:textColor="#AAAAAA"
+                android:textSize="11sp"
+                android:layout_marginBottom="4dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="8dp">
+
+                <Button
+                    android:id="@+id/roiBtn0"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_weight="1"
+                    android:text="0°"
+                    android:textSize="12sp"
+                    android:layout_marginEnd="4dp" />
+
+                <Button
+                    android:id="@+id/roiBtn90"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_weight="1"
+                    android:text="90°"
+                    android:textSize="12sp"
+                    android:layout_marginEnd="4dp" />
+
+                <Button
+                    android:id="@+id/roiBtn180"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_weight="1"
+                    android:text="180°"
+                    android:textSize="12sp"
+                    android:layout_marginEnd="4dp" />
+
+                <Button
+                    android:id="@+id/roiBtn270"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_weight="1"
+                    android:text="270°"
+                    android:textSize="12sp" />
+
+            </LinearLayout>
+
+            <!-- 機種名入力 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="機種名メモ"
+                android:textColor="#AAAAAA"
+                android:textSize="11sp"
+                android:layout_marginBottom="4dp" />
+
+            <EditText
+                android:id="@+id/roiEditDevice"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="text"
+                android:textColor="#FFFFFF"
+                android:background="#333333"
+                android:padding="6dp"
+                android:textSize="14sp"
+                android:hint="例: Pixel 7"
+                android:textColorHint="#666666"
+                android:layout_marginBottom="12dp" />
+
+            <!-- 保存ボタン -->
+            <Button
+                android:id="@+id/roiSaveButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="保存"
+                android:textSize="16sp"
+                app:backgroundTint="#2196F3"
+                android:textColor="#FFFFFF" />
+
+        </LinearLayout>
+    </ScrollView>
+
+</LinearLayout>

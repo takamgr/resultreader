@@ -304,7 +304,10 @@ class CameraActivity : AppCompatActivity() {
             resultText = resultText,
             tournamentInfoText = tournamentInfoText,
             previewView = previewView,
-            ocrRectPx = OCR_RECT_PX,
+            getBaseX = { loadBaseX() },
+            getBaseY = { loadBaseY() },
+            getBaseWidth = { loadBaseWidth() },
+            getRotationDegrees = { loadRotation() },
             getImageCapture = { imageCapture },
             getIsManualCameraControl = { isManualCameraControl || isAutoModeEnabled },
             getEntryMap = { entryMap },
@@ -585,15 +588,16 @@ class CameraActivity : AppCompatActivity() {
 
 
 
-// ← 長押しで entrylist 再読み込み解除＋ボタン復活
+// ← 長押しでROI設定画面を開く
         tournamentSettingButton.setOnLongClickListener {
-            val prefs = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
-            prefs.edit().putBoolean("entrylist_loaded_once", false).apply()
-
-            val entryListImportButton = findViewById<ImageButton>(R.id.entryListImportButton)
-            entryListImportButton.visibility = View.VISIBLE
-
-            Toast.makeText(this, "🔓 entrylist 再読み込みが有効になりました", Toast.LENGTH_SHORT).show()
+            AlertDialog.Builder(this)
+                .setTitle("ROI設定")
+                .setMessage("ROI調整画面を開きますか？\n（カメラのOCR読み取り位置を調整します）")
+                .setPositiveButton("開く") { _, _ ->
+                    startActivity(android.content.Intent(this, RoiSettingActivity::class.java))
+                }
+                .setNegativeButton("キャンセル", null)
+                .show()
             true
         }
 
@@ -680,6 +684,18 @@ class CameraActivity : AppCompatActivity() {
         entryProgressText.text =
             "AM ${p.amDone}/${p.totalEntries}（残${p.amRemain}）  PM ${p.pmDone}/${p.totalEntries}（残${p.pmRemain}）"
     }
+
+    private fun loadBaseX(): Int =
+        getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE).getInt("base_x", 436)
+
+    private fun loadBaseY(): Int =
+        getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE).getInt("base_y", 750)
+
+    private fun loadBaseWidth(): Int =
+        getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE).getInt("base_width", 2033)
+
+    private fun loadRotation(): Float =
+        getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE).getInt("roi_rotation", 90).toFloat()
 
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
         ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED

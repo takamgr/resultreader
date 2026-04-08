@@ -27,7 +27,10 @@ class OcrProcessor(
     private val resultText: TextView,
     private val tournamentInfoText: TextView,
     private val previewView: androidx.camera.view.PreviewView,
-    private val ocrRectPx: Rect,
+    private val getBaseX: () -> Int,
+    private val getBaseY: () -> Int,
+    private val getBaseWidth: () -> Int,
+    private val getRotationDegrees: () -> Float,
     private val getImageCapture: () -> ImageCapture?,
     private val getIsManualCameraControl: () -> Boolean,
     private val getEntryMap: () -> Map<Int, Pair<String, String>>,
@@ -164,29 +167,7 @@ class OcrProcessor(
                         onSetCurrentRowClass(null)
                     }
 
-                    val scoreX = 570
-                    val scoreY = 1030
-                    val scoreWidth = 990
-                    val scoreHeight = 400
-
-                    val scaleX = 1.67f
-                    val scaleY = 2.20f
-                    val bx = (scoreX * scaleX).toInt() - 540
-                    val by = (scoreY * scaleY).toInt() - 1160
-                    val bw = (scoreWidth * scaleX).toInt() + 380
-                    val bh = (scoreHeight * scaleY).toInt() - 70
-
-                    val roiOffsetX = 25
-                    val roiOffsetY = 50
-                    val rawScoreBitmap = Bitmap.createBitmap(
-                        fullImage,
-                        (bx + roiOffsetX).coerceIn(0, fullImage.width - bw),
-                        (by + roiOffsetY).coerceIn(0, fullImage.height - bh),
-                        bw,
-                        bh
-                    )
-
-                    val scoreBitmap = rawScoreBitmap.copy(Bitmap.Config.ARGB_8888, true)
+                    val scoreBitmap = calcScoreRoiBitmap(fullImage)
 
                     // ← マゼンタ罫線などのデバッグ描画
                     showDebugScoreOnPreview(scoreBitmap)
@@ -252,13 +233,14 @@ class OcrProcessor(
                 object : ImageCapture.OnImageSavedCallback {
                     override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                         val bitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
-                        val rotated = rotateBitmap(bitmap, 90f)
+                        val rotated = rotateBitmap(bitmap, getRotationDegrees())
+                        val rect = calcOcrRect()
                         val cropped = Bitmap.createBitmap(
                             rotated,
-                            ocrRectPx.left,
-                            ocrRectPx.top,
-                            ocrRectPx.width(),
-                            ocrRectPx.height()
+                            rect.left.coerceIn(0, rotated.width - rect.width()),
+                            rect.top.coerceIn(0, rotated.height - rect.height()),
+                            rect.width(),
+                            rect.height()
                         )
 
                         recognizeText(cropped, rotated) { result ->
@@ -323,33 +305,12 @@ class OcrProcessor(
                     override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                         try {
                             val bitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
-                            val rotated = rotateBitmap(bitmap, 90f)
+                            val rotated = rotateBitmap(bitmap, getRotationDegrees())
 
                             // pendingSaveBitmap を設定（保存時に使うため）
                             onSetPendingBitmap(rotated)
 
-                            // ▼ recognizeText() 内と同じROI計算をそのまま使用
-                            val scoreX = 570
-                            val scoreY = 1030
-                            val scoreWidth = 990
-                            val scoreHeight = 400
-                            val scaleX = 1.67f
-                            val scaleY = 2.20f
-                            val bx = (scoreX * scaleX).toInt() - 540
-                            val by = (scoreY * scaleY).toInt() - 1160
-                            val bw = (scoreWidth * scaleX).toInt() + 380
-                            val bh = (scoreHeight * scaleY).toInt() - 70
-                            val roiOffsetX = 25
-                            val roiOffsetY = 50
-
-                            val rawScoreBitmap = Bitmap.createBitmap(
-                                rotated,
-                                (bx + roiOffsetX).coerceIn(0, rotated.width - bw),
-                                (by + roiOffsetY).coerceIn(0, rotated.height - bh),
-                                bw,
-                                bh
-                            )
-                            val scoreBitmap = rawScoreBitmap.copy(Bitmap.Config.ARGB_8888, true)
+                            val scoreBitmap = calcScoreRoiBitmap(rotated)
 
                             // デバッググリッド（既存と同等）
                             showDebugScoreOnPreview(scoreBitmap)
@@ -379,5 +340,47 @@ class OcrProcessor(
         scorePreview.visibility = View.GONE
 
         takeNext(0)
+    }
+
+    /**
+     * EntryNo OCR 枠を相対比率から計算して返す。
+     * x = baseX + 0.0044 × baseWidth
+     * y = baseY
+     * w = 0.1377 × baseWidth
+     * h = 0.1082 × baseWidth
+     */
+    private fun calcOcrRect(): Rect {
+        val bx = getBaseX()
+        val by = getBaseY()
+        val bw = getBaseWidth()
+        val left   = (bx + 0.0044f * bw).toInt()
+        val top    = by
+        val width  = (0.1377f * bw).toInt()
+        val height = (0.1082f * bw).toInt()
+        return Rect(left, top, left + width, top + height)
+    }
+
+    /**
+     * スコアグリッド領域を相対比率から計算して切り出す。
+     * x = baseX
+     * y = baseY + 0.1997 × baseWidth
+     * w = baseWidth
+     * h = 0.3984 × baseWidth
+     */
+    private fun calcScoreRoiBitmap(fullImage: Bitmap): Bitmap {
+        val bx = getBaseX()
+        val by = getBaseY()
+        val bw = getBaseWidth()
+        val left   = bx
+        val top    = (by + 0.1997f * bw).toInt()
+        val width  = bw
+        val height = (0.3984f * bw).toInt()
+        return Bitmap.createBitmap(
+            fullImage,
+            left.coerceIn(0, fullImage.width - width),
+            top.coerceIn(0, fullImage.height - height),
+            width,
+            height
+        ).copy(Bitmap.Config.ARGB_8888, true)
     }
 }
