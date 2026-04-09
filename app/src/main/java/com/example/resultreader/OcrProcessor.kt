@@ -204,8 +204,8 @@ class OcrProcessor(
 
                 if (majority != null) {
                     onUpdateScoreUi(majority)
-                    guideOverlay.setDetected("green")
-                    confirmButton.visibility = View.VISIBLE
+                    // setDetected / confirmButton の表示は
+                    // onUpdateScoreUi → recalculateScore() が正しく決定するため、ここでは上書きしない
                 } else {
                     guideOverlay.setDetected("red")
                     Toast.makeText(
@@ -280,8 +280,8 @@ class OcrProcessor(
 
                 if (majority != null) {
                     onUpdateScoreUi(majority)
-                    guideOverlay.setDetected("green")
-                    confirmButton.visibility = View.VISIBLE
+                    // setDetected / confirmButton の表示は
+                    // onUpdateScoreUi → recalculateScore() が正しく決定するため、ここでは上書きしない
                 } else {
                     guideOverlay.setDetected("red")
                     Toast.makeText(context, "⚠️ 判定一致せず：手動確認してください", Toast.LENGTH_LONG).show()

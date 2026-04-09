@@ -111,8 +111,6 @@ class TournamentManager(
                     updateTournamentInfoText()
                     Toast.makeText(context, "✅ エントリーリスト読み込み完了\n$toastText", Toast.LENGTH_LONG).show()
 
-                    // 読み込み完了後にボタンを非表示に！
-                    context.findViewById<ImageButton>(R.id.entryListImportButton).visibility = View.GONE
                 }
                 .setNegativeButton("キャンセル", null)
                 .show()
@@ -123,9 +121,6 @@ class TournamentManager(
                 .apply()
             updateTournamentInfoText()
             Toast.makeText(context, "✅ エントリーリスト読み込み完了\n$toastText", Toast.LENGTH_LONG).show()
-
-            // 読み込み完了後にボタンを非表示に！
-            context.findViewById<ImageButton>(R.id.entryListImportButton).visibility = View.GONE
         }
     }
 

@@ -548,28 +548,16 @@ class CameraActivity : AppCompatActivity() {
             true
         }
 
-        findViewById<ImageButton>(R.id.entryListImportButton).setOnClickListener {
+        // ↓ボタンは常時表示
+        val entryListImportButton = findViewById<ImageButton>(R.id.entryListImportButton)
+        entryListImportButton.setOnClickListener {
             entryListPickerLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv"))
         }
-        val prefsEntryCheck = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
-        val alreadyLoaded = prefsEntryCheck.getBoolean("entrylist_loaded_once", false)
-        val entryListImportButton = findViewById<ImageButton>(R.id.entryListImportButton)
-
-// ✅ 1日1回制限：読み込み済なら非表示
-        if (alreadyLoaded) {
-            entryListImportButton.visibility = View.GONE
-        } else {
-            entryListImportButton.setOnClickListener {
-                entryListPickerLauncher.launch(
-                    arrayOf("text/csv", "text/comma-separated-values", "application/csv")
-                )
-            }
-        }
-
-// ✅ 長押しで解除（トースト付き）
+        // 長押し：読み込み済みフラグをリセットして再読み込みを可能にする
         entryListImportButton.setOnLongClickListener {
-            prefsEntryCheck.edit().putBoolean("entrylist_loaded_once", false).apply()
-            Toast.makeText(this, "🔓 entrylist の再読み込みが有効になりました", Toast.LENGTH_SHORT).show()
+            val prefs = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
+            prefs.edit().putBoolean("entrylist_loaded_once", false).apply()
+            Toast.makeText(this, "🔓 再読み込みが有効になりました。↓ボタンでCSVを選択してください", Toast.LENGTH_SHORT).show()
             true
         }
 
