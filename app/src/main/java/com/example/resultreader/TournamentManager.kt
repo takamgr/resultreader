@@ -42,8 +42,6 @@ class TournamentManager(
         }
         val patternText = getSelectedPattern().patternCode
         tournamentInfoText.text = "$patternText / ${getCurrentSession()} / $type"
-
-        prefs.edit().putBoolean("entrylist_loaded_once", true).apply()
     }
 
     fun copyCsvToAppStorage(uri: Uri) {
