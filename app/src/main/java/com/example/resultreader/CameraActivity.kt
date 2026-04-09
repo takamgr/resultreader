@@ -310,7 +310,7 @@ class CameraActivity : AppCompatActivity() {
             getCurrentRowClass = { currentRowClass },
             onPatternChanged = { selectedPattern = it },
             onSessionChanged = { currentSession = it },
-            onEntryMapUpdated = { entryMap = it },
+            onEntryMapUpdated = { entryMap = it; updateEntryProgressDisplay() },
             onClassChanged = { currentRowClass = it },
             onCaptureScoreRequested = { ocrProcessor.captureScoreOnlyMultiple() }
         )
@@ -383,7 +383,7 @@ class CameraActivity : AppCompatActivity() {
         val lastSetDate = prefs.getString("lastSetDate", null)
 
         if (today != lastSetDate) {
-            tournamentManager.showInitialTournamentSettingDialog(entryMap) {
+            tournamentManager.showInitialTournamentSettingDialog({ entryMap }) {
                 prefs.edit().apply {
                     putString("lastSetDate", today)
                     putString("lastPattern", selectedPattern.name)
@@ -447,7 +447,7 @@ class CameraActivity : AppCompatActivity() {
 
         tournamentSettingButton = findViewById(R.id.tournamentSettingButton)
         tournamentSettingButton.setOnClickListener {
-            tournamentManager.showInitialTournamentSettingDialog(entryMap) {
+            tournamentManager.showInitialTournamentSettingDialog({ entryMap }) {
                 updateEntryProgressDisplay()
             }
         }
@@ -582,13 +582,13 @@ class CameraActivity : AppCompatActivity() {
                     .setTitle("⚠️ 大会設定の変更確認")
                     .setMessage("エントリーリストを読み込んだ後に大会設定を変更すると、保存形式と不一致が発生する可能性があります。\n\nそれでも変更しますか？")
                     .setPositiveButton("はい（変更する）") { _, _ ->
-                        tournamentManager.showInitialTournamentSettingDialog(entryMap) {}
+                        tournamentManager.showInitialTournamentSettingDialog({ entryMap }) {}
                     }
                     .setNegativeButton("いいえ（キャンセル）", null)
                     .show()
             } else {
                 // 未読み込み時はそのまま変更可能
-                tournamentManager.showInitialTournamentSettingDialog(entryMap) {}
+                tournamentManager.showInitialTournamentSettingDialog({ entryMap }) {}
             }
         }
 

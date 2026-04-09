@@ -160,7 +160,7 @@ class TournamentManager(
     }
 
     fun showInitialTournamentSettingDialog(
-        entryMap: Map<Int, Pair<String, String>>,
+        getEntryMap: () -> Map<Int, Pair<String, String>>,
         onComplete: () -> Unit
     ) {
         val dialogView = context.layoutInflater.inflate(R.layout.dialog_tournament_setting, null)
@@ -207,15 +207,15 @@ class TournamentManager(
 
         // ▼ チェック系3ボタン
         dialogView.findViewById<Button>(R.id.buttonCheckAm).setOnClickListener {
-            resultChecker.checkAmStatus(getSelectedPattern(), entryMap)
+            resultChecker.checkAmStatus(getSelectedPattern(), getEntryMap())
         }
 
         dialogView.findViewById<Button>(R.id.buttonCheckMissing).setOnClickListener {
-            resultChecker.checkMissingEntries(getCurrentSession(), getSelectedPattern(), entryMap)
+            resultChecker.checkMissingEntries(getCurrentSession(), getSelectedPattern(), getEntryMap())
         }
 
         dialogView.findViewById<Button>(R.id.buttonCheckFinal).setOnClickListener {
-            resultChecker.checkFinalStatus(getSelectedPattern(), entryMap)
+            resultChecker.checkFinalStatus(getSelectedPattern(), getEntryMap())
         }
 
         // ▼ 大会名・開催日 入力
