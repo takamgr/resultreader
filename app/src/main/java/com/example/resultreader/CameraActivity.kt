@@ -110,6 +110,7 @@ class CameraActivity : AppCompatActivity() {
     private lateinit var scorePreview: ImageView
     private lateinit var tournamentInfoText: TextView
     internal lateinit var entryProgressText: TextView
+    private lateinit var roiPreviewOverlay: RoiPreviewOverlayView // 変更
 
 
 
@@ -257,6 +258,7 @@ class CameraActivity : AppCompatActivity() {
         guideOverlay = findViewById(R.id.guideOverlay)
         scorePreview = findViewById(R.id.scorePreview)
         previewView = findViewById(R.id.previewView)
+        roiPreviewOverlay = findViewById(R.id.roiPreviewOverlay) // 変更
 
         // 検出状態変化 → autoModeText・scoreLabels の背景色を連動させる
         val scoreLabelsContainer = findViewById<android.widget.LinearLayout>(R.id.scoreLabels)
@@ -768,7 +770,22 @@ class CameraActivity : AppCompatActivity() {
             onSetPendingBitmap = { pendingSaveBitmap = it },
             onSetCurrentRowClass = { currentRowClass = it }
         )
+        // 変更: ROIプレビューオーバーレイを最新のbase値で更新
+        updateRoiPreviewOverlay()
+        // 変更ここまで
     }
+
+    // 変更: ShardPreferencesからROI情報を読んでオーバーレイに反映する
+    private fun updateRoiPreviewOverlay() {
+        val dev = activeDevice()
+        val p = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
+        val imgW = if (dev.isBlank()) p.getInt("image_width",  0)
+                   else p.getInt("roi_${dev}_image_width",  0)
+        val imgH = if (dev.isBlank()) p.getInt("image_height", 0)
+                   else p.getInt("roi_${dev}_image_height", 0)
+        roiPreviewOverlay.setRoi(loadBaseX(), loadBaseY(), loadBaseWidth(), imgW, imgH)
+    }
+    // 変更ここまで
 
     override fun onDestroy() {
         super.onDestroy()

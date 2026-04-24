@@ -69,7 +69,15 @@
         <androidx.camera.view.PreviewView
             android:id="@+id/previewView"
             android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            app:scaleType="fitCenter" />
+
+        <!-- 変更: ROI設定枠のオーバーレイ表示 -->
+        <com.example.resultreader.RoiPreviewOverlayView
+            android:id="@+id/roiPreviewOverlay"
+            android:layout_width="match_parent"
             android:layout_height="match_parent" />
+        <!-- 変更ここまで -->
 
         <!-- 右上：縦長の丸背景内にボタン3つ -->
         <LinearLayout

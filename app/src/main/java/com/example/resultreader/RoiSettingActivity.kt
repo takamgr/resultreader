@@ -234,6 +234,12 @@ class RoiSettingActivity : AppCompatActivity() {
             putInt("roi_${deviceName}_base_width",  currentWidth)
             putInt("roi_${deviceName}_base_height", h)
             putInt("roi_${deviceName}_rotation",   currentRotation)
+            // 変更: テスト撮影済みの場合、画像サイズを保存（メイン画面のROI表示に使用）
+            capturedBitmap?.let {
+                putInt("roi_${deviceName}_image_width",  it.width)
+                putInt("roi_${deviceName}_image_height", it.height)
+            }
+            // 変更ここまで
             putString(KEY_ACTIVE_DEVICE, deviceName)
             if (!deviceList.contains(deviceName)) {
                 deviceList.add(deviceName)
