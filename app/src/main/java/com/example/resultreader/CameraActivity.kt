@@ -550,9 +550,16 @@ class CameraActivity : AppCompatActivity() {
 
         // ↓ボタンは常時表示
         val entryListImportButton = findViewById<ImageButton>(R.id.entryListImportButton)
-        entryListImportButton.setOnClickListener {
-            entryListPickerLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv"))
-        }
+        entryListImportButton.setOnClickListener { // 変更
+            AlertDialog.Builder(this) // 変更
+                .setTitle("EntryList読み込み") // 変更
+                .setMessage("EntryListをダウンロードしますか？") // 変更
+                .setPositiveButton("OK") { _, _ -> // 変更
+                    entryListPickerLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv")) // 変更
+                } // 変更
+                .setNegativeButton("キャンセル", null) // 変更
+                .show() // 変更
+        } // 変更
         // 長押し：読み込み済みフラグをリセットして再読み込みを可能にする
         entryListImportButton.setOnLongClickListener {
             val prefs = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
