@@ -457,8 +457,9 @@ class CameraActivity : AppCompatActivity() {
 
         // 撮影準備
         prepareButton.setOnClickListener {
-            isAutoModeEnabled = false
-            isManualCameraControl = true
+            if (!isAutoModeEnabled) {  // 変更: オートモード中は手動切替しない
+                isManualCameraControl = true
+            }
             if (!isCameraReady) {
                 pendingManualCapture = true
                 startedCameraForManualShot = true
