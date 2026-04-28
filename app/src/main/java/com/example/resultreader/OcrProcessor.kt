@@ -179,12 +179,10 @@ class OcrProcessor(
         fun takeNext(count: Int) {
             if (count >= 3) {
                 val grouped = results.groupBy { it.sectionScores }
-                val majority = grouped.maxByOrNull { it.value.size }?.value?.firstOrNull()
-
-                if (majority != null) {
-                    onUpdateScoreUi(majority)
-                    // setDetected / confirmButton の表示は
-                    // onUpdateScoreUi → recalculateScore() が正しく決定するため、ここでは上書きしない
+                // 変更
+                val majorityGroup = grouped.maxByOrNull { it.value.size }
+                if (majorityGroup != null && majorityGroup.value.size >= 2) {
+                    onUpdateScoreUi(majorityGroup.value.first())
                 } else {
                     guideOverlay.setDetected("red")
                     Toast.makeText(
@@ -192,9 +190,7 @@ class OcrProcessor(
                         "⚠️ 判定一致せず：手動確認して修正してください",
                         Toast.LENGTH_LONG
                     ).show()
-                    // エラー時はチェック音を鳴らす
                     onPlayErrorSound()
-                    confirmButton.visibility = View.VISIBLE
                 }
 
                 return
@@ -225,13 +221,17 @@ class OcrProcessor(
                         }
                     }
 
+                    // 変更
                     override fun onError(e: ImageCaptureException) {
                         Toast.makeText(context.applicationContext, "撮影エラー", Toast.LENGTH_SHORT).show()
+                        takeNext(count + 1)
                     }
                 }
             )
         }
 
+        // 変更
+        confirmButton.visibility = View.GONE
         takeNext(0)
     }
 
@@ -251,18 +251,14 @@ class OcrProcessor(
         fun takeNext(count: Int) {
             if (count >= 3) {
                 val grouped = results.groupBy { it.sectionScores }
-                val majority = grouped.maxByOrNull { it.value.size }?.value?.firstOrNull()
-
-                if (majority != null) {
-                    onUpdateScoreUi(majority)
-                    // setDetected / confirmButton の表示は
-                    // onUpdateScoreUi → recalculateScore() が正しく決定するため、ここでは上書きしない
+                // 変更
+                val majorityGroup = grouped.maxByOrNull { it.value.size }
+                if (majorityGroup != null && majorityGroup.value.size >= 2) {
+                    onUpdateScoreUi(majorityGroup.value.first())
                 } else {
                     guideOverlay.setDetected("red")
                     Toast.makeText(context, "⚠️ 判定一致せず：手動確認してください", Toast.LENGTH_LONG).show()
-                    // エラー時はチェック音を鳴らす
                     onPlayErrorSound()
-                    confirmButton.visibility = View.VISIBLE
                 }
 
                 return
@@ -299,8 +295,10 @@ class OcrProcessor(
                         }
                     }
 
+                    // 変更
                     override fun onError(e: ImageCaptureException) {
                         Toast.makeText(context.applicationContext, "撮影エラー", Toast.LENGTH_SHORT).show()
+                        takeNext(count + 1)
                     }
                 }
             )
