@@ -79,6 +79,17 @@ EntryNo, Name, Class, Sec01〜, AmG, AmC, AmRank, SecXX〜, PmG, PmC, PmRank, To
 - スコアグリッド背景色でも同時表示
 - 赤=待機中 / 黄=要確認 / 緑=読み取りOK
 
+## 重要な技術情報（Ver2.4判明）
+- CameraManager.startCamera() は未使用
+  実際はCameraActivity.kt内のprivate fun startCamera()（L811）が動いている
+- CameraManagerのスリープ機能は無効化済み
+  resetInactivityTimer()の呼び出し（L620・L650）を削除
+  isCameraSuspendedがfalseに戻る処理がなくバグの原因だったため
+- stopCameraIfAutoMode() はOcrProcessor.ktから削除済み
+  OCR後のカメラ自動停止が手動・オート両モードの撮影エラーの原因だったため
+- prepareButton単押しのオートモード強制解除バグを修正済み
+  isAutoModeEnabled=falseの時のみisManualCameraControl=trueにする
+
 ## 開発ルール
 - 既存の動作は一切変えない
 - ロジックは移動するだけで書き換えない
