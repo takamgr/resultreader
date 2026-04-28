@@ -48,27 +48,6 @@ class OcrProcessor(
     private val onSetCurrentRowClass: (String?) -> Unit
 ) {
 
-    // カメラ自動停止（captureAndAnalyzeMultiple / captureScoreOnlyMultiple 共通）
-    private fun stopCameraIfAutoMode() {
-        if (getIsManualCameraControl()) return
-        try {
-            ProcessCameraProvider.getInstance(context).get().unbindAll()
-        } catch (e: Exception) {
-            Log.e("CAMERA", "カメラ停止失敗", e)
-        }
-        onCameraStop()  // camera=null, imageCapture=null, isCameraReady=false
-
-        // 🔥 プレビューを完全OFF
-        previewView.visibility = View.GONE
-        previewView.alpha = 0f
-        previewView.setBackgroundColor(Color.BLACK)
-
-        guideOverlay.visibility = View.GONE
-        context.findViewById<android.widget.FrameLayout>(R.id.previewContainer)
-            .setBackgroundColor(Color.BLACK)
-
-        context.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-    }
 
     private fun rotateBitmap(source: Bitmap, degrees: Float): Bitmap {
         val matrix = Matrix().apply { postRotate(degrees) }
@@ -218,10 +197,6 @@ class OcrProcessor(
                     confirmButton.visibility = View.VISIBLE
                 }
 
-                // 🔥 自動モード時のみカメラ完全停止！
-                stopCameraIfAutoMode()
-                Log.d("CAMERA", "📴 OCR完了後にカメラ自動停止")
-
                 return
             }
 
@@ -290,9 +265,6 @@ class OcrProcessor(
                     confirmButton.visibility = View.VISIBLE
                 }
 
-                // 自動モード時のみ停止（既存と同等）
-                stopCameraIfAutoMode()
-                Log.d("CAMERA", "📴 手入力EntryNoからのスコア読取後に自動停止")
                 return
             }
 

@@ -617,7 +617,7 @@ class CameraActivity : AppCompatActivity() {
             true
         }
 
-        cameraManager.resetInactivityTimer()  // ← 初期化時にも起動しておく
+        // 変更: スリープ機能無効化
 
         entryMap = tournamentManager.loadEntryMap()
 
@@ -647,7 +647,7 @@ class CameraActivity : AppCompatActivity() {
 
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        cameraManager.resetInactivityTimer()
+        // 変更: スリープ機能無効化
         return super.dispatchTouchEvent(ev)
     }
 
