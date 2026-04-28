@@ -107,6 +107,34 @@ Ver2.4（タグ付け済み）
 - OCR後のカメラ自動停止を削除（手動・オート両モードの撮影エラー解消）
 - 撮影ボタン単押しでオートモードが解除されるバグを修正
 
+## Ver2.4 → Ver2.5 変更内容（2026-04-28）
+
+### 多数決ロジック修正（OcrProcessor.kt）
+
+#### 問題
+- 撮影エラー時にtakeNext(count+1)が呼ばれず3回撮影が止まっていた
+- 多数決の一致判定が件数（results.size）だけで、スコア内容の一致を見ていなかった
+- 多数決完了前にconfirmButtonが表示され1回目の結果で保存できてしまっていた
+- 判定一致せず時もconfirmButtonが表示されていた
+
+#### 修正内容
+1. captureAndAnalyzeMultiple() / captureScoreOnlyMultiple() の
+   onError に takeNext(count + 1) を追加
+   → 撮影エラーでも3回完走するように
+
+2. 多数決条件を majorityGroup.value.size >= 2 に変更
+   → スコア内容が2件以上一致しないと確定しないように
+
+3. takeNext(0) 直前に confirmButton.visibility = View.GONE を追加
+   → 多数決完了前は保存ボタンを非表示に
+
+4. 判定一致せず（else）ブランチの confirmButton.visibility = View.VISIBLE を削除
+   → 判定一致せず時は保存ボタンを出さない
+
+#### 現在の動作
+- 3回中2件以上スコアが一致 → 保存ボタン表示
+- 3回中1件のみ or 全滅    → 「判定一致せず」トースト・保存ボタン非表示
+
 ## 次の課題
 - whiteRatio（自動撮影の白カード検知閾値）の機種対応検討
 - 実際の競技会場でのテスト
