@@ -73,8 +73,8 @@ class CameraActivity : AppCompatActivity() {
     internal var autoTempPreviewShown: Boolean = false
     internal var autoCardTickCount: Int = 0
     internal val CARD_RECT = RectF(0.125f, 0.35f, 0.875f, 0.85f)
-    internal val AUTO_CENTER_WIDTH_RATIO = 0.4f
-    internal val AUTO_CENTER_HEIGHT_RATIO = 0.4f
+    internal val AUTO_CENTER_WIDTH_RATIO = 0.2f
+    internal val AUTO_CENTER_HEIGHT_RATIO = 0.2f
 
     private var isManualCameraControl = false
     private lateinit var guideToggleButton: ImageButton
@@ -929,30 +929,70 @@ class CameraActivity : AppCompatActivity() {
                         val width = imageProxy.width
                         val height = imageProxy.height
 
-                        // 1) まずは赤枠（カード全体）の画素座標を求める
-                        val cardLeft = CARD_RECT.left * width
-                        val cardRight = CARD_RECT.right * width
-                        val cardTop = CARD_RECT.top * height
-                        val cardBottom = CARD_RECT.bottom * height
+                        // ---- ROI座標計算（ROI調整済み座標ベース） ----
+                        val bx = loadBaseX()
+                        val by = loadBaseY()
+                        val bw = loadBaseWidth()
+                        val rotation = loadRotation()
+                        val prefsRoi = getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
+                        val dev = activeDevice()
+                        val refW = if (dev.isBlank()) prefsRoi.getInt("image_width", 0) else prefsRoi.getInt("roi_${dev}_image_width", 0)
+                        val refH = if (dev.isBlank()) prefsRoi.getInt("image_height", 0) else prefsRoi.getInt("roi_${dev}_image_height", 0)
 
-                        val cardCenterX = (cardLeft + cardRight) / 2f
-                        val cardCenterY = (cardTop + cardBottom) / 2f
-                        val cardWidth = cardRight - cardLeft
-                        val cardHeight = cardBottom - cardTop
+                        val roiLeft: Int
+                        val roiRight: Int
+                        val roiTop: Int
+                        val roiBottom: Int
 
-                        // 2) その中の「中央ミニ領域」（中央40%×40%）をROIとして使う
-                        val miniWidth = cardWidth * AUTO_CENTER_WIDTH_RATIO
-                        val miniHeight = cardHeight * AUTO_CENTER_HEIGHT_RATIO
+                        Log.d("AutoCard", "rotation=${rotation} dev=${dev} refW=${refW} refH=${refH}")
+                        Log.d("AutoCard", "base bx=${bx} by=${by} bw=${bw}")
 
-                        val roiLeftF = cardCenterX - miniWidth / 2f
-                        val roiRightF = cardCenterX + miniWidth / 2f
-                        val roiTopF = cardCenterY - miniHeight / 2f
-                        val roiBottomF = cardCenterY + miniHeight / 2f
+                        if (refW > 0 && refH > 0) {
+                            // base座標はrotation後(portrait)の画像空間で定義。
+                            // rotation=90(CW)の場合: portrait_y→imageProxy_x, portrait_x→imageProxy_y(反転)
+                            when (rotation.toInt()) {
+                                90 -> {
+                                    roiLeft   = (bx * width.toFloat() / refW).toInt().coerceIn(0, width - 1)
+                                    roiRight  = ((bx + bw) * width.toFloat() / refW).toInt().coerceIn(roiLeft + 1, width)
+                                    roiTop    = (by * height.toFloat() / refH).toInt().coerceIn(0, height - 1)
+                                    roiBottom = ((by + bw * 55f / 91f) * height.toFloat() / refH).toInt().coerceIn(roiTop + 1, height)
+                                }
+                                else -> {
+                                    roiLeft   = (bx * width.toFloat() / refW).toInt().coerceIn(0, width - 1)
+                                    roiRight  = ((bx + bw) * width.toFloat() / refW).toInt().coerceIn(roiLeft + 1, width)
+                                    roiTop    = (by * height.toFloat() / refH).toInt().coerceIn(0, height - 1)
+                                    roiBottom = ((by + bw * 55f / 91f) * height.toFloat() / refH).toInt().coerceIn(roiTop + 1, height)
+                                }
+                            }
+                        } else {
+                            // フォールバック: CARD_RECT ベース（refW/refH未設定時）
+                            // val cardLeft = CARD_RECT.left * width
+                            // val cardRight = CARD_RECT.right * width
+                            // val cardTop = CARD_RECT.top * height
+                            // val cardBottom = CARD_RECT.bottom * height
+                            // val cardCenterX = (cardLeft + cardRight) / 2f
+                            // val cardCenterY = (cardTop + cardBottom) / 2f
+                            // val cardWidth = cardRight - cardLeft
+                            // val cardHeight = cardBottom - cardTop
+                            // val miniWidth = cardWidth * AUTO_CENTER_WIDTH_RATIO
+                            // val miniHeight = cardHeight * AUTO_CENTER_HEIGHT_RATIO
+                            // val roiLeftF = cardCenterX - miniWidth / 2f
+                            // val roiRightF = cardCenterX + miniWidth / 2f
+                            // val roiTopF = cardCenterY - miniHeight / 2f
+                            // val roiBottomF = cardCenterY + miniHeight / 2f
+                            val cardCenterX = ((CARD_RECT.left + CARD_RECT.right) / 2f) * width
+                            val cardCenterY = ((CARD_RECT.top + CARD_RECT.bottom) / 2f) * height
+                            val miniW = (CARD_RECT.right - CARD_RECT.left) * width * AUTO_CENTER_WIDTH_RATIO
+                            val miniH = (CARD_RECT.bottom - CARD_RECT.top) * height * AUTO_CENTER_HEIGHT_RATIO
+                            roiLeft   = (cardCenterX - miniW / 2f).toInt().coerceIn(0, width - 1)
+                            roiRight  = (cardCenterX + miniW / 2f).toInt().coerceIn(roiLeft + 1, width)
+                            roiTop    = (cardCenterY - miniH / 2f).toInt().coerceIn(0, height - 1)
+                            roiBottom = (cardCenterY + miniH / 2f).toInt().coerceIn(roiTop + 1, height)
+                        }
+                        // ---- ROI座標計算ここまで ----
 
-                        val roiLeft = roiLeftF.toInt().coerceIn(0, width - 1)
-                        val roiRight = roiRightF.toInt().coerceIn(roiLeft + 1, width)
-                        val roiTop = roiTopF.toInt().coerceIn(0, height - 1)
-                        val roiBottom = roiBottomF.toInt().coerceIn(roiTop + 1, height)
+                        Log.d("AutoCard", "ROI left=$roiLeft top=$roiTop right=$roiRight bottom=$roiBottom imgW=$width imgH=$height")
+                        runOnUiThread { roiPreviewOverlay.setAutoRoi(bx, by, bw, refW, refH) }
 
                         // Y平面取得（明るさ情報）
                         val yPlane = imageProxy.planes[0]
@@ -1012,16 +1052,16 @@ class CameraActivity : AppCompatActivity() {
 
 
 // 安定判定の閾値（AEがフラフラしても通す）
-                        val lumaThr  = 15f
-                        val whiteThr = 0.35f
+                        val lumaThr  = 3f
+                        val whiteThr = 0.005f
 
 // 「白い状態が続いているなら」stable を溜める
                         if (isWhiteEnough && isBrightEnough) {
 
 
                             if (lastAvgLuma < 0f || lastWhiteRatio < 0f) {
-                                // 初回は比較できないので 1 から開始
-                                stableFrameCount = 1
+                                // 初回は比較できないので 0 から開始
+                                stableFrameCount = 0
                             } else {
                                 val lumaDiff  = kotlin.math.abs(avgLuma - lastAvgLuma)
                                 val whiteDiff = kotlin.math.abs(whiteRatio - lastWhiteRatio)
@@ -1029,8 +1069,7 @@ class CameraActivity : AppCompatActivity() {
                                 if (lumaDiff < lumaThr && whiteDiff < whiteThr) {
                                     stableFrameCount++
                                 } else {
-                                    // いきなり0に戻さず1に落とす（白い状態は維持してる前提）
-                                    stableFrameCount = 1
+                                    stableFrameCount = 0
                                 }
                             }
 
@@ -1046,6 +1085,7 @@ class CameraActivity : AppCompatActivity() {
 
 // 最終トリガー条件（静止判定カウント
                         val isStableEnough = stableFrameCount >= 20
+
 
 // ---- 静止白カード発火（ここだけ）----
                         if (isWhiteEnough && isBrightEnough && isStableEnough) {

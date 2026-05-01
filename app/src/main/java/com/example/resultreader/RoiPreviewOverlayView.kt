@@ -34,6 +34,32 @@ class RoiPreviewOverlayView @JvmOverloads constructor(
         isAntiAlias = true
     }
 
+    private val paintAutoRoi = Paint().apply {
+        color = Color.BLUE
+        strokeWidth = 4f
+        style = Paint.Style.STROKE
+        isAntiAlias = true
+    }
+
+    private var autoRoiLeft = 0f
+    private var autoRoiTop = 0f
+    private var autoRoiRight = 0f
+    private var autoRoiBottom = 0f
+    private var autoImgW = 0f
+    private var autoImgH = 0f
+    private var hasAutoRoi = false
+
+    fun setAutoRoi(baseX: Int, baseY: Int, baseWidth: Int, imageW: Int, imageH: Int) {
+        autoRoiLeft   = baseX.toFloat()
+        autoRoiTop    = baseY.toFloat()
+        autoRoiRight  = (baseX + baseWidth).toFloat()
+        autoRoiBottom = (baseY + baseWidth * 55f / 91f)
+        autoImgW      = imageW.toFloat()
+        autoImgH      = imageH.toFloat()
+        hasAutoRoi    = imageW > 0 && imageH > 0
+        invalidate()
+    }
+
     /** ROI情報をセット。imageW/imageHは撮影画像のピクセルサイズ（回転後） */
     fun setRoi(baseX: Int, baseY: Int, baseWidth: Int, imageW: Int, imageH: Int) {
         this.baseX = baseX.toFloat()
@@ -76,5 +102,17 @@ class RoiPreviewOverlayView @JvmOverloads constructor(
         canvas.drawLine(l, b, l + cs, b, paintCorner)
         canvas.drawLine(r, b - cs, r, b, paintCorner)
         canvas.drawLine(r - cs, b, r, b, paintCorner)
+
+        // 青矩形：オートモードのwhiteRatio計算ROI（ポートレート座標をfitCenterで変換）
+        if (hasAutoRoi) {
+            val scale = minOf(vw / autoImgW, vh / autoImgH)
+            val offsetX = (vw - autoImgW * scale) / 2f
+            val offsetY = (vh - autoImgH * scale) / 2f
+            val al = autoRoiLeft   * scale + offsetX
+            val at = autoRoiTop    * scale + offsetY
+            val ar = autoRoiRight  * scale + offsetX
+            val ab = autoRoiBottom * scale + offsetY
+            canvas.drawRect(al, at, ar, ab, paintAutoRoi)
+        }
     }
 }
