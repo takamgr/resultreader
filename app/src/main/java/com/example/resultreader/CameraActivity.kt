@@ -162,6 +162,33 @@ class CameraActivity : AppCompatActivity() {
 
 
     // 画像保存を無効化（今後は保存しない）
+    private fun showDnfDnsDialog() {
+        // 変更：DNF/DNS選択ダイアログ（guideToggleButton長押し用）
+        val items = arrayOf(
+            "DNF（途中リタイア）として保存",
+            "DNS（出走せず）として保存",
+            "キャンセル"
+        )
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("このエントリーの保存種別")
+            .setItems(items) { dialog, which ->
+                when (which) {
+                    0 -> saveManager.requestSaveWithStatus(
+                        SaveManager.SaveStatus.DNF,
+                        selectedPattern, currentSession,
+                        pendingSaveBitmap, currentRowClass, entryMap
+                    )
+                    1 -> saveManager.requestSaveWithStatus(
+                        SaveManager.SaveStatus.DNS,
+                        selectedPattern, currentSession,
+                        pendingSaveBitmap, currentRowClass, entryMap
+                    )
+                    else -> dialog.dismiss()
+                }
+            }
+            .show()
+    }
+
     private fun saveImage(bitmap: Bitmap) {
         // スコア画像の保存は行いません（デバッグ用途の保存機能は廃止）
         Log.d("SaveImage", "スコア画像保存は現在無効です")
@@ -193,28 +220,14 @@ class CameraActivity : AppCompatActivity() {
 
         // 🔹撮影準備ボタン長押し → 保存ボタン長押し（DNF/DNSダイアログ）と同じ動作
         guideToggleButton.setOnLongClickListener {
-            confirmButton.performLongClick()
+            // 変更：DNS/DNF専用ボタン（撮影済みのEntryNoに対して実行）
+            showDnfDnsDialog()
             true
         }
 
         guideToggleButton.setOnClickListener {
-            if (!isCameraReady) {
-                startCamera()
-                return@setOnClickListener
-            }
-            if (isAutoModeEnabled) {
-                if (isPreviewVisibleInAutoMode) {
-                    hidePreviewOnly()
-                    Toast.makeText(this, "🔦 Preview OFF（自動モード）", Toast.LENGTH_SHORT).show()
-                } else {
-                    showPreviewOnly()
-                    Toast.makeText(this, "🔦 Preview ON（自動モード）", Toast.LENGTH_SHORT).show()
-                }
-            } else {
-                stopCameraAndPreview()
-                Toast.makeText(this, "📴 カメラOFF（手動）", Toast.LENGTH_SHORT).show()
-            }
-            window.decorView.setBackgroundColor(Color.BLACK)
+            // 変更：カメラON/OFF機能を削除。長押しでDNF/DNS操作。
+            Toast.makeText(this, "長押しでDNF/DNS登録", Toast.LENGTH_SHORT).show()
         }
 
 
@@ -641,6 +654,8 @@ class CameraActivity : AppCompatActivity() {
             csvFileManager.showExportPopupMenu(it, selectedPattern)
             true
         }
+
+        startCamera() // 変更：起動時から常時カメラON
     }
 
 

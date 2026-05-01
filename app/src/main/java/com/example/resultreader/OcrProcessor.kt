@@ -185,6 +185,7 @@ class OcrProcessor(
                     onUpdateScoreUi(majorityGroup.value.first())
                 } else {
                     guideOverlay.setDetected("red")
+                    resultText.text = "要確認"
                     Toast.makeText(
                         context,
                         "⚠️ 判定一致せず：手動確認して修正してください",
@@ -257,6 +258,7 @@ class OcrProcessor(
                     onUpdateScoreUi(majorityGroup.value.first())
                 } else {
                     guideOverlay.setDetected("red")
+                    resultText.text = "要確認"
                     Toast.makeText(context, "⚠️ 判定一致せず：手動確認してください", Toast.LENGTH_LONG).show()
                     onPlayErrorSound()
                 }
