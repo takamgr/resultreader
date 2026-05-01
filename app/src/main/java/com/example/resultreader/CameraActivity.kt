@@ -944,9 +944,6 @@ class CameraActivity : AppCompatActivity() {
                         val roiTop: Int
                         val roiBottom: Int
 
-                        Log.d("AutoCard", "rotation=${rotation} dev=${dev} refW=${refW} refH=${refH}")
-                        Log.d("AutoCard", "base bx=${bx} by=${by} bw=${bw}")
-
                         if (refW > 0 && refH > 0) {
                             // base座標はrotation後(portrait)の画像空間で定義。
                             // rotation=90(CW)の場合: portrait_y→imageProxy_x, portrait_x→imageProxy_y(反転)
@@ -991,7 +988,6 @@ class CameraActivity : AppCompatActivity() {
                         }
                         // ---- ROI座標計算ここまで ----
 
-                        Log.d("AutoCard", "ROI left=$roiLeft top=$roiTop right=$roiRight bottom=$roiBottom imgW=$width imgH=$height")
                         runOnUiThread { roiPreviewOverlay.setAutoRoi(bx, by, bw, refW, refH) }
 
                         // Y平面取得（明るさ情報）
