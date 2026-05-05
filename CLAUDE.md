@@ -135,6 +135,22 @@ Ver2.4（タグ付け済み）
 - 3回中2件以上スコアが一致 → 保存ボタン表示
 - 3回中1件のみ or 全滅    → 「判定一致せず」トースト・保存ボタン非表示
 
+## Ver2.5.2 変更内容（2026-05-02）
+
+* 起動時カメラON
+  onCreate()末尾にstartCamera()を追加。起動時から常時カメラON。
+
+* □ボタン（guideToggleButton）仕様変更
+  - カメラON/OFF機能を削除
+  - クリック：トーストのみ（誤操作防止）
+  - 長押し：DNF/DNS専用（showDnfDnsDialog()を呼ぶ）
+  - アイコン：ic_web_asset_off
+  - EntryNo入力なし・撮影済み前提の運用
+
+* 多数決不一致時の表示変更（OcrProcessor.kt）
+  - captureAndAnalyzeMultiple・captureScoreOnlyMultiple両方
+  - トースト後にresultText.text = "要確認"
+
 ## 次の課題
 - whiteRatio（自動撮影の白カード検知閾値）の機種対応検討
 - 実際の競技会場でのテスト

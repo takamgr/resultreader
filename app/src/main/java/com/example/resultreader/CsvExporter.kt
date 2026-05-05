@@ -198,6 +198,7 @@ object CsvExporter {
             val classGroups = rows.groupBy { it.getOrNull(2) ?: "?" }
             for ((clazz, group) in classGroups) {
                 if (clazz.isBlank() || clazz == "?") continue
+                if (clazz == "賞典外") continue
                 group
                     .mapNotNull { row -> scoreGetter(row)?.let { score -> row to score } }
                     .sortedWith(
