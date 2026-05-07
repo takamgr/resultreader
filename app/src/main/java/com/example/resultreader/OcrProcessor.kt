@@ -216,6 +216,18 @@ class OcrProcessor(
                             rect.height()
                         )
 
+                        // 変更: EntryNo切り出し画像をプレビュー表示
+                        val activity = context as? CameraActivity
+                        if (activity?.isEntryNoPreviewEnabled() == true) {
+                            activity.runOnUiThread {
+                                activity.getEntryNoPreviewImage().apply {
+                                    visibility = View.VISIBLE
+                                    setImageBitmap(cropped)
+                                }
+                            }
+                        }
+                        // 変更ここまで
+
                         recognizeText(cropped, rotated) { result ->
                             result?.let { results.add(it) }
                             takeNext(count + 1)
@@ -233,6 +245,12 @@ class OcrProcessor(
 
         // 変更
         confirmButton.visibility = View.GONE
+        // 変更: 撮影開始時にEntryNoプレビューをクリア（確定画像は次の撮影で上書き）
+        val activityForClear = context as? CameraActivity
+        if (activityForClear?.isEntryNoPreviewEnabled() == true) {
+            activityForClear.getEntryNoPreviewImage().visibility = View.GONE
+        }
+        // 変更ここまで
         takeNext(0)
     }
 
@@ -327,7 +345,8 @@ class OcrProcessor(
         val by = getBaseY()
         val bw = getBaseWidth()
         val left   = (bx + 0.0044f * bw).toInt()
-        val top    = by
+        val entryNoOffsetY = 0  // 変更: 調整用オフセット（後で数値を変える）
+        val top    = by + entryNoOffsetY
         val width  = (0.1377f * bw).toInt()
         val height = (0.1082f * bw).toInt()
         return Rect(left, top, left + width, top + height)

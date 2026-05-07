@@ -72,6 +72,18 @@
             android:layout_height="match_parent"
             app:scaleType="fitCenter" />
 
+        <!-- 変更: EntryNo OCR結果プレビュー -->
+        <ImageView
+            android:id="@+id/entryNoPreviewImage"
+            android:layout_width="60dp"
+            android:layout_height="40dp"
+            android:layout_gravity="top|start"
+            android:layout_marginTop="80dp"
+            android:scaleType="fitCenter"
+            android:visibility="gone"
+            android:background="#80000000" />
+        <!-- 変更ここまで -->
+
         <!-- 変更: ROI設定枠のオーバーレイ表示 -->
         <com.example.resultreader.RoiPreviewOverlayView
             android:id="@+id/roiPreviewOverlay"
@@ -117,7 +129,7 @@
                 android:id="@+id/guideToggleButton"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-                android:src="@drawable/ic_web_asset_off"
+                android:src="@drawable/ic_dnf"
                 app:tint="#FFFFFF"
                 android:background="@android:color/transparent"
                 android:contentDescription="ガイド" />

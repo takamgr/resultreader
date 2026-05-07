@@ -117,7 +117,7 @@ class RoiSettingActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        try { ProcessCameraProvider.getInstance(this).get().unbindAll() } catch (_: Exception) {}
+        // 変更: unbindAll()を削除。シングルトンのCameraProviderを通じてCameraActivityのバインドも解除されてしまうため
     }
 
     override fun onRequestPermissionsResult(

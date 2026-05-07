@@ -102,6 +102,11 @@ class CameraActivity : AppCompatActivity() {
     private lateinit var flashToggleButton: ImageButton
     private lateinit var tournamentSettingButton: ImageButton  // ← Button から変更
 
+    // 変更: EntryNoプレビュー用
+    private var isEntryNoPreviewEnabled = false
+    private lateinit var entryNoPreviewImage: ImageView
+    // 変更ここまで
+
     private lateinit var previewView: PreviewView
     private lateinit var resultText: TextView
     private lateinit var prepareButton: Button
@@ -272,6 +277,7 @@ class CameraActivity : AppCompatActivity() {
         scorePreview = findViewById(R.id.scorePreview)
         previewView = findViewById(R.id.previewView)
         roiPreviewOverlay = findViewById(R.id.roiPreviewOverlay) // 変更
+        entryNoPreviewImage = findViewById(R.id.entryNoPreviewImage) // 変更: EntryNoプレビュー
 
         // 検出状態変化 → autoModeText・scoreLabels の背景色を連動させる
         val scoreLabelsContainer = findViewById<android.widget.LinearLayout>(R.id.scoreLabels)
@@ -459,6 +465,17 @@ class CameraActivity : AppCompatActivity() {
                 if (isFlashOn) R.drawable.ic_flash_off else R.drawable.ic_flash
             )
         }
+        // 変更: ライトボタン長押し → EntryNoプレビューON/OFF
+        flashToggleButton.setOnLongClickListener {
+            isEntryNoPreviewEnabled = !isEntryNoPreviewEnabled
+            if (!isEntryNoPreviewEnabled) {
+                entryNoPreviewImage.visibility = View.GONE
+            }
+            val msg = if (isEntryNoPreviewEnabled) "プレビューON" else "プレビューOFF"
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+            true
+        }
+        // 変更ここまで
 
         tournamentSettingButton = findViewById(R.id.tournamentSettingButton)
         tournamentSettingButton.setOnClickListener {
@@ -789,6 +806,9 @@ class CameraActivity : AppCompatActivity() {
         // 変更: ROIプレビューオーバーレイを最新のbase値で更新
         updateRoiPreviewOverlay()
         // 変更ここまで
+        // 変更: ROI設定画面等から戻ったときカメラを再起動する
+        startCamera()
+        // 変更ここまで
     }
 
     // 変更: ShardPreferencesからROI情報を読んでオーバーレイに反映する
@@ -821,6 +841,11 @@ class CameraActivity : AppCompatActivity() {
 
 
 
+
+    // 変更: OcrProcessorからEntryNoプレビュー用ImageViewと有効フラグを取得するゲッター
+    fun getEntryNoPreviewImage() = entryNoPreviewImage
+    fun isEntryNoPreviewEnabled() = isEntryNoPreviewEnabled
+    // 変更ここまで
 
     // ===== AUTO/MANUAL モード関連関数 =====
 
