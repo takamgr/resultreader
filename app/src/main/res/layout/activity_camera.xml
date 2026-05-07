@@ -10,6 +10,7 @@
     android:layout_height="match_parent"
     tools:context=".CameraActivity">
 
+
     <!-- プレビュー -->
     <FrameLayout
         android:id="@+id/previewContainer"
@@ -72,6 +73,7 @@
             android:layout_height="match_parent"
             app:scaleType="fitCenter" />
 
+
         <!-- 変更: EntryNo OCR結果プレビュー -->
         <ImageView
             android:id="@+id/entryNoPreviewImage"
@@ -79,10 +81,11 @@
             android:layout_height="40dp"
             android:layout_gravity="top|start"
             android:layout_marginTop="80dp"
+            android:layout_marginStart="15dp"
             android:scaleType="fitCenter"
             android:visibility="gone"
             android:background="#80000000" />
-        <!-- 変更ここまで -->
+               <!-- 変更ここまで -->
 
         <!-- 変更: ROI設定枠のオーバーレイ表示 -->
         <com.example.resultreader.RoiPreviewOverlayView
@@ -253,7 +256,7 @@
         android:orientation="vertical"
         android:gravity="center"
         android:padding="16dp"
-        android:background="#F8F8F8"
+        android:background="#f8f8f8"
         app:layout_constraintTop_toBottomOf="@id/previewContainer"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"

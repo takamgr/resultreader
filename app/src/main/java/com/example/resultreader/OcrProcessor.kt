@@ -335,20 +335,25 @@ class OcrProcessor(
 
     /**
      * EntryNo OCR 枠を相対比率から計算して返す。
-     * x = baseX + 0.0044 × baseWidth
-     * y = baseY
-     * w = 0.1377 × baseWidth
-     * h = 0.1082 × baseWidth
+     * x = baseX + 0.0044 × baseWidth + entryNoOffsetX
+     * y = baseY + entryNoOffsetY
+     * w = 0.1377 × baseWidth × entryNoScaleW
+     * h = 0.1082 × baseWidth × entryNoScaleH
      */
     private fun calcOcrRect(): Rect {
         val bx = getBaseX()
         val by = getBaseY()
         val bw = getBaseWidth()
-        val left   = (bx + 0.0044f * bw).toInt()
-        val entryNoOffsetY = 0  // 変更: 調整用オフセット（後で数値を変える）
+        // 変更: ROI微調整用パラメータ
+        val entryNoOffsetY = 10    // 上下位置（増やすと下へ）
+        val entryNoOffsetX = 60    // 左右位置（増やすと右へ）
+        val entryNoScaleW = 1.0f  // 横幅の倍率（1.2fで1.2倍）
+        val entryNoScaleH = 1.2f  // 縦幅の倍率（1.2fで1.2倍）
+        // 変更ここまで
+        val left   = (bx + 0.0044f * bw).toInt() + entryNoOffsetX
         val top    = by + entryNoOffsetY
-        val width  = (0.1377f * bw).toInt()
-        val height = (0.1082f * bw).toInt()
+        val width  = (0.1377f * bw * entryNoScaleW).toInt()
+        val height = (0.1082f * bw * entryNoScaleH).toInt()
         return Rect(left, top, left + width, top + height)
     }
 
