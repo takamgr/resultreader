@@ -180,7 +180,7 @@ object CsvExporter {
         // 12) 共通情報の更新
         if (timeIndex >= 0) row[timeIndex] = currentTime
         if (inputTypeIndex >= 0) row[inputTypeIndex] = label
-        if (sessionIndex >= 0) row[sessionIndex] = currentSession
+        if (existingIndex < 0 && sessionIndex >= 0) row[sessionIndex] = currentSession  // 変更
 
         // 13) rows に反映
         if (existingIndex >= 0) {

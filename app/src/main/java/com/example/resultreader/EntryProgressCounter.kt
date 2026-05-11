@@ -39,13 +39,16 @@ object EntryProgressCounter {
 
             val header = lines.first()
                 .split(",")
-                .map { it.replace("\uFEFF", "").trim() }
+                .map { it.trimStart('﻿').trim() }
 
             val entryCol = header.indexOf("EntryNo")
-            val sessionCol = header.indexOf("セッション")
-            if (entryCol == -1 || sessionCol == -1) {
+            if (entryCol == -1) {
                 return Progress(total, 0, 0)
             }
+
+            val amGCol = header.indexOf("AmG")
+            val pmGCol = header.indexOf("PmG")
+            val inputCol = header.indexOf("入力")
 
             val amSet = mutableSetOf<Int>()
             val pmSet = mutableSetOf<Int>()
@@ -53,13 +56,12 @@ object EntryProgressCounter {
             lines.drop(1).forEach { line ->
                 val cols = line.split(",")
                 val entryNo = cols.getOrNull(entryCol)?.trim()?.toIntOrNull() ?: return@forEach
-                val session = cols.getOrNull(sessionCol)?.trim() ?: return@forEach
-
-                // ★「保存された人数」を数えるだけなので、DNF/DNSも “提出済み” としてカウントする
-                when (session) {
-                    "AM" -> amSet.add(entryNo)
-                    "PM" -> pmSet.add(entryNo)
-                }
+                val amG = cols.getOrNull(amGCol)?.trim()
+                val pmG = cols.getOrNull(pmGCol)?.trim()
+                val inputType = cols.getOrNull(inputCol)?.trim() ?: ""
+                val isDnfOrDns = inputType.contains("DNF") || inputType.contains("DNS")
+                if (!amG.isNullOrBlank() || isDnfOrDns) amSet.add(entryNo) // 変更
+                if (!pmG.isNullOrBlank() || isDnfOrDns) pmSet.add(entryNo) // 変更
             }
 
             Progress(totalEntries = total, amDone = amSet.size, pmDone = pmSet.size)

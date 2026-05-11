@@ -10,18 +10,38 @@ import java.util.Locale
 
 class ResultChecker(private val context: Context) {
 
+    // 変更: クラスソート順定義（3関数共通）
+    private val classOrder = mapOf("IA" to 0, "IB" to 1, "NA" to 2, "NB" to 3, "オープン" to 4, "ビギナー" to 5, "SP" to 6)
+
+    // 変更: クラス順・EntryNo昇順でソートし「No:X 氏名 [クラス]」形式の文字列を返す
+    private fun sortedMissingMessage(missing: List<Int>, entryMap: Map<Int, Pair<String, String>>): String =
+        missing
+            .sortedWith(compareBy({ classOrder[entryMap[it]?.second] ?: 99 }, { it }))
+            .joinToString("\n") { "No:$it ${entryMap[it]?.first ?: ""} [${entryMap[it]?.second ?: ""}]" }
+
     // ------------------------------------------------------------
     // AMチェック（AM同点＋AM未集計）
     // ------------------------------------------------------------
     fun checkAmStatus(selectedPattern: TournamentPattern, entryMap: Map<Int, Pair<String, String>>) {
         try {
+            // 変更: entryMapが空の場合はトーストで通知して終了
+            if (entryMap.isEmpty()) {
+                Toast.makeText(context, "エントリーリストが読み込まれていません", Toast.LENGTH_SHORT).show()
+                return
+            }
+
             val pattern = selectedPattern ?: return
             val today = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
             val fileName = "result_${pattern.patternCode}_$today.csv"
             val csvFile = File(context.getExternalFilesDir("ResultReader"), fileName)
 
+            // 変更: CSVがない場合は全エントリーを未集計扱いで表示（早期returnしない）
             if (!csvFile.exists()) {
-                Toast.makeText(context, "CSVがまだありません", Toast.LENGTH_SHORT).show()
+                AlertDialog.Builder(context)
+                    .setTitle("AM未集計エントリー")
+                    .setMessage(sortedMissingMessage(entryMap.keys.toList(), entryMap))
+                    .setPositiveButton("OK", null)
+                    .show()
                 return
             }
 
@@ -34,7 +54,7 @@ class ResultChecker(private val context: Context) {
 
             val header = allLines.first()
                 .split(",")
-                .map { it.replace("\uFEFF", "").trim() }   // ← ここ大事
+                .map { it.replace("﻿", "").trim() }   // ← ここ大事
             val rows = allLines.drop(1).map { it.split(",") }
 
             val entryNoIdx = header.indexOf("EntryNo")
@@ -73,7 +93,7 @@ class ResultChecker(private val context: Context) {
             if (missing.isNotEmpty()) {
                 AlertDialog.Builder(context)
                     .setTitle("AM未集計エントリー")
-                    .setMessage(missing.joinToString("\n") { "No:$it ${entryMap[it]?.first ?: ""}" })
+                    .setMessage(sortedMissingMessage(missing, entryMap)) // 変更: クラス付き・ソート済み
                     .setPositiveButton("OK", null)
                     .show()
             } else {
@@ -92,13 +112,24 @@ class ResultChecker(private val context: Context) {
     // ------------------------------------------------------------
     fun checkMissingEntries(session: String, selectedPattern: TournamentPattern, entryMap: Map<Int, Pair<String, String>>) {
         try {
+            // 変更: entryMapが空の場合はトーストで通知して終了
+            if (entryMap.isEmpty()) {
+                Toast.makeText(context, "エントリーリストが読み込まれていません", Toast.LENGTH_SHORT).show()
+                return
+            }
+
             val pattern = selectedPattern ?: return
             val today = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
             val fileName = "result_${pattern.patternCode}_$today.csv"
             val csvFile = File(context.getExternalFilesDir("ResultReader"), fileName)
 
+            // 変更: CSVがない場合は全エントリーを未集計扱いで表示（早期returnしない）
             if (!csvFile.exists()) {
-                Toast.makeText(context, "CSVがまだありません", Toast.LENGTH_SHORT).show()
+                AlertDialog.Builder(context)
+                    .setTitle("${session}未集計エントリー")
+                    .setMessage(sortedMissingMessage(entryMap.keys.toList(), entryMap))
+                    .setPositiveButton("OK", null)
+                    .show()
                 return
             }
 
@@ -107,7 +138,7 @@ class ResultChecker(private val context: Context) {
 
             val header = allLines.first()
                 .split(",")
-                .map { it.replace("\uFEFF", "").trim() }
+                .map { it.replace("﻿", "").trim() }
             val rows = allLines.drop(1).map { it.split(",") }
 
             val entryNoIdx = header.indexOf("EntryNo")
@@ -143,7 +174,7 @@ class ResultChecker(private val context: Context) {
             if (missing.isNotEmpty()) {
                 AlertDialog.Builder(context)
                     .setTitle("${session}未集計エントリー")
-                    .setMessage(missing.joinToString("\n") { "No:$it ${entryMap[it]?.first ?: ""}" })
+                    .setMessage(sortedMissingMessage(missing, entryMap)) // 変更: クラス付き・ソート済み
                     .setPositiveButton("OK", null)
                     .show()
             } else {
@@ -160,13 +191,24 @@ class ResultChecker(private val context: Context) {
     // ------------------------------------------------------------
     fun checkFinalStatus(selectedPattern: TournamentPattern, entryMap: Map<Int, Pair<String, String>>) {
         try {
+            // 変更: entryMapが空の場合はトーストで通知して終了
+            if (entryMap.isEmpty()) {
+                Toast.makeText(context, "エントリーリストが読み込まれていません", Toast.LENGTH_SHORT).show()
+                return
+            }
+
             val pattern = selectedPattern ?: return
             val today = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
             val fileName = "result_${pattern.patternCode}_$today.csv"
             val csvFile = File(context.getExternalFilesDir("ResultReader"), fileName)
 
+            // 変更: CSVがない場合は全エントリーを未集計扱いで表示（早期returnしない）
             if (!csvFile.exists()) {
-                Toast.makeText(context, "CSVがまだありません", Toast.LENGTH_SHORT).show()
+                AlertDialog.Builder(context)
+                    .setTitle("最終チェック")
+                    .setMessage("最終同点はありません\n\nPM未集計エントリー:\n${sortedMissingMessage(entryMap.keys.toList(), entryMap)}")
+                    .setPositiveButton("OK", null)
+                    .show()
                 return
             }
 
@@ -175,7 +217,7 @@ class ResultChecker(private val context: Context) {
 
             val header = allLines.first()
                 .split(",")
-                .map { it.replace("\uFEFF", "").trim() }
+                .map { it.replace("﻿", "").trim() }
             val rows = allLines.drop(1).map { it.split(",") }
 
             val entryNoIdx  = header.indexOf("EntryNo")
@@ -216,8 +258,7 @@ class ResultChecker(private val context: Context) {
 
             val missingMsg =
                 if (missing.isNotEmpty()) {
-                    "PM未集計エントリー:\n" +
-                            missing.joinToString("\n") { "No:$it ${entryMap[it]?.first ?: ""}" }
+                    "PM未集計エントリー:\n" + sortedMissingMessage(missing, entryMap) // 変更: クラス付き・ソート済み
                 } else {
                     "PM未集計はありません"
                 }

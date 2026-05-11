@@ -98,63 +98,91 @@ EntryNo, Name, Class, Sec01〜, AmG, AmC, AmRank, SecXX〜, PmG, PmC, PmRank, To
 - 作業前にgit pull・作業後にgit push
 
 ## 現在のバージョン
-Ver2.4（タグ付け済み）
+Ver2.5.7（タグ付け済み）
+
+## UI構成
+右上ボタン（縦並び）：
+- 電球：単押し=フラッシュON/OFF / 長押し=EntryNoプレビューON/OFF
+- □：クリック=誤操作防止トースト / 長押し=DNF/DNS
+- 歯車：単押し=大会設定 / 長押し=3択メニュー（ROI調整・全リセット・バックアップ復元）
+- ↓：単押し=EntryListファイル選択 / 長押し=entrylist読込ロック解除
+- フォルダ：単押し=CSVファイル一覧（複数選択削除対応） / 長押し=CSV/PDF出力
+
+## SharedPreferencesキー一覧（ResultReaderPrefs）
+### 大会設定系（全リセット対象）
+- lastSetDate：大会設定ダイアログの日付比較用
+- lastPattern：前回パターン（PATTERN_4x2等）
+- lastSession：前回セッション（AM/PM）
+- tournamentType：大会種別（championship/beginner）
+- tournamentName：大会名（PDF/HTML出力用）
+- eventDate：開催日（PDF/HTML出力用）
+- eventTitle：大会タイトル（PrintableExporter用）
+- entrylist_loaded_once：EntryList読み込み済みフラグ
+
+### ROI設定系（全リセット対象外・機種変更後も保持）
+- roi_active_device：使用中の機種名
+- roi_device_list：登録機種名カンマ区切り
+- roi_{device}_base_x/base_y/base_width/base_height/rotation/image_width/image_height
+- base_x/base_y/base_width/roi_rotation/image_width/image_height（機種未設定時フォールバック）
+
+## バックアップ仕様
+- 保存先：getExternalFilesDir("ResultReader") 内（スコアCSVと同フォルダ）
+- ファイル名：result_{pattern}_{date}_backup.csv
+- 全リセット時に自動生成、バックアップ復元後も元ファイルは残す
+
+## バージョン履歴
+
+### Ver2.4（タグ付け済み）
 - ファイル分割完了（CameraActivity 2200行→685行）
 - ROI調整機能実装（複数機種対応）
 - 多機種での動作確認済み（3機種）
 - 画面サイズ自動フィット対応
-- スリープ機能無効化（10秒タイマーによるカメラ自動停止を削除）
-- OCR後のカメラ自動停止を削除（手動・オート両モードの撮影エラー解消）
+- スリープ機能無効化
+- OCR後のカメラ自動停止を削除
 - 撮影ボタン単押しでオートモードが解除されるバグを修正
 
-## Ver2.4 → Ver2.5 変更内容（2026-04-28）
+### Ver2.5（2026-04-28）
+多数決ロジック修正（OcrProcessor.kt）
+- 撮影エラー時にtakeNext(count+1)を追加→3回完走
+- 多数決条件をmajorityGroup.value.size >= 2に変更
+- 多数決完了前はconfirmButtonを非表示
+- 判定一致せず時はconfirmButtonを出さない
 
-### 多数決ロジック修正（OcrProcessor.kt）
+### Ver2.5.2（2026-05-06）
+- 起動時カメラON（onCreate()末尾にstartCamera()追加）
+- □ボタン：カメラON/OFF削除→クリック=トースト/長押し=DNF/DNS専用
+- 多数決不一致時にresultText.text = "要確認"
+- SPクラスのランク除外（CsvExporter.kt）
 
-#### 問題
-- 撮影エラー時にtakeNext(count+1)が呼ばれず3回撮影が止まっていた
-- 多数決の一致判定が件数（results.size）だけで、スコア内容の一致を見ていなかった
-- 多数決完了前にconfirmButtonが表示され1回目の結果で保存できてしまっていた
-- 判定一致せず時もconfirmButtonが表示されていた
+### Ver2.5.3（2026-05-07）
+- 電球ボタン長押しでEntryNoプレビューON/OFF
+- EntryNo切り出し画像をFrameLayout左上に表示（60×40dp・半透明黒背景）
+- ROI設定後にカメラが復帰しない不具合を修正
+  - RoiSettingActivity.onDestroy()のunbindAll()を削除
+  - CameraActivity.onResume()にstartCamera()を追加
 
-#### 修正内容
-1. captureAndAnalyzeMultiple() / captureScoreOnlyMultiple() の
-   onError に takeNext(count + 1) を追加
-   → 撮影エラーでも3回完走するように
+### Ver2.5.5（2026-05-07）
+- calcOcrRect()に調整用パラメータを追加
+  - entryNoOffsetY/entryNoOffsetX（上下左右位置）
+  - entryNoScaleW/entryNoScaleH（縦横倍率）
+- EntryNo OCR読み取り位置の調整完了
 
-2. 多数決条件を majorityGroup.value.size >= 2 に変更
-   → スコア内容が2件以上一致しないと確定しないように
+### Ver2.5.6（2026-05-08）
+- ResultChecker.kt 未集計エントリー表示を改善
+  - 表示形式：「No:1 相川 秀斗 [IA]」（クラス付き）
+  - ソート順：IA→IB→NA→NB→オープン→ビギナー→SP、同クラス内EntryNo昇順
+  - CSV保存0件・CSVなしでも全entryMapを未集計として表示
+  - entryMapが空の場合はトースト「エントリーリストが読み込まれていません」
+- 歯車ボタン長押しを3択メニューに変更
+  - ROI調整（従来と同じ）
+  - 全リセット：result_*.csvをバックアップ後削除→大会設定系PrefsをremoveしてROI設定は保持→アプリ再起動
+  - バックアップから復元：_backup.csvを元ファイル名にコピー→アプリ再起動
 
-3. takeNext(0) 直前に confirmButton.visibility = View.GONE を追加
-   → 多数決完了前は保存ボタンを非表示に
-
-4. 判定一致せず（else）ブランチの confirmButton.visibility = View.VISIBLE を削除
-   → 判定一致せず時は保存ボタンを出さない
-
-#### 現在の動作
-- 3回中2件以上スコアが一致 → 保存ボタン表示
-- 3回中1件のみ or 全滅    → 「判定一致せず」トースト・保存ボタン非表示
-
-## Ver2.5.2 変更内容（2026-05-06）
-
-* 起動時カメラON
-  onCreate()末尾にstartCamera()を追加。起動時から常時カメラON。
-
-* □ボタン（guideToggleButton）仕様変更
-  - カメラON/OFF機能を削除
-  - クリック：トーストのみ（誤操作防止）
-  - 長押し：DNF/DNS専用（showDnfDnsDialog()を呼ぶ）
-  - アイコン：ic_web_asset_off
-  - 撮影済み前提の運用（EntryNo入力ダイアログなし）
-
-* 多数決不一致時の表示変更（OcrProcessor.kt）
-  - captureAndAnalyzeMultiple・captureScoreOnlyMultiple両方
-  - トースト後にresultText.text = "要確認"
-
-* SPクラスのランク除外（CsvExporter.kt）
-  - assignClassRank()内にif (clazz == "SP") continueを追加
-  - スコアは出力されるがRank欄は空欄
-  - EntryList.csvのClass欄は半角大文字「SP」で統一
+### Ver2.5.7（2026-05-08）
+- CsvFileManager.kt CSVファイル一覧を複数選択削除に変更
+  - setMultiChoiceItems（チェックボックス付きリスト）
+  - タップでチェックON/OFF、削除ボタンで確認後一括削除
+  - 長押しで1件操作メニュー（開く/ダウンロードへコピー/共有/削除）は従来通り
 
 ## 次の課題
 - whiteRatio（自動撮影の白カード検知閾値）の機種対応検討

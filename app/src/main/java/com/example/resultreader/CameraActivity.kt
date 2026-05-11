@@ -635,18 +635,109 @@ class CameraActivity : AppCompatActivity() {
 
 
 
-// ← 長押しでROI設定画面を開く
+// 変更: 長押しで3択メニューを表示（ROI調整・全リセット・バックアップから復元）
         tournamentSettingButton.setOnLongClickListener {
+            val menuItems = arrayOf("ROI調整", "全リセット", "バックアップから復元")
             AlertDialog.Builder(this)
-                .setTitle("ROI設定")
-                .setMessage("ROI調整画面を開きますか？\n（カメラのOCR読み取り位置を調整します）")
-                .setPositiveButton("開く") { _, _ ->
-                    startActivity(android.content.Intent(this, RoiSettingActivity::class.java))
+                .setTitle("操作を選択")
+                .setItems(menuItems) { _, which ->
+                    when (which) {
+                        0 -> {
+                            // 変更: ROI調整（従来と同じ）
+                            AlertDialog.Builder(this)
+                                .setTitle("ROI設定")
+                                .setMessage("ROI調整画面を開きますか？\n（カメラのOCR読み取り位置を調整します）")
+                                .setPositiveButton("開く") { _, _ ->
+                                    startActivity(android.content.Intent(this, RoiSettingActivity::class.java))
+                                }
+                                .setNegativeButton("キャンセル", null)
+                                .show()
+                        }
+                        1 -> {
+                            // 変更: 全リセット（確認2段階）
+                            AlertDialog.Builder(this)
+                                .setTitle("全リセット")
+                                .setMessage("全データをリセットしますか？大会設定・スコアデータがすべて削除されます")
+                                .setPositiveButton("はい") { _, _ ->
+                                    AlertDialog.Builder(this)
+                                        .setTitle("最終確認")
+                                        .setMessage("本当によいですか？この操作は元に戻せません")
+                                        .setPositiveButton("OK") { _, _ ->
+                                            // 変更: ① result_*.csv（_backupを含まない）を探す
+                                            val dir = getExternalFilesDir("ResultReader")
+                                            val targets = dir?.listFiles { f ->
+                                                f.name.startsWith("result_") &&
+                                                f.name.endsWith(".csv") &&
+                                                !f.name.contains("_backup")
+                                            } ?: emptyArray()
+                                            // 変更: ② バックアップコピー → ③ 元ファイル削除
+                                            targets.forEach { original ->
+                                                val backupName = original.name.removeSuffix(".csv") + "_backup.csv"
+                                                val backupFile = File(dir, backupName)
+                                                original.copyTo(backupFile, overwrite = true)
+                                                original.delete()
+                                            }
+                                            // 変更: ④ 大会設定キーのみ個別削除（roi_系は残す）
+                                            getSharedPreferences("ResultReaderPrefs", MODE_PRIVATE)
+                                                .edit()
+                                                .remove("lastSetDate")
+                                                .remove("lastPattern")
+                                                .remove("lastSession")
+                                                .remove("tournamentType")
+                                                .remove("tournamentName")
+                                                .remove("eventDate")
+                                                .remove("eventTitle")
+                                                .remove("entrylist_loaded_once")
+                                                .apply()
+                                            // 変更: ⑤ アプリ再起動
+                                            val intent = android.content.Intent(this, CameraActivity::class.java).apply {
+                                                flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                                                        android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
+                                            }
+                                            startActivity(intent)
+                                        }
+                                        .setNegativeButton("キャンセル", null)
+                                        .show()
+                                }
+                                .setNegativeButton("いいえ", null)
+                                .show()
+                        }
+                        2 -> {
+                            // 変更: バックアップから復元
+                            val dir = getExternalFilesDir("ResultReader")
+                            val backups = dir?.listFiles { f ->
+                                f.name.endsWith("_backup.csv")
+                            } ?: emptyArray()
+                            if (backups.isEmpty()) {
+                                Toast.makeText(this, "バックアップがありません", Toast.LENGTH_SHORT).show()
+                            } else {
+                                AlertDialog.Builder(this)
+                                    .setTitle("バックアップから復元")
+                                    .setMessage("バックアップから復元しますか？現在のデータは上書きされます")
+                                    .setPositiveButton("復元") { _, _ ->
+                                        // 変更: ① _backup.csvを元のファイル名にコピー（バックアップは残す）
+                                        backups.forEach { backup ->
+                                            val originalName = backup.name.removeSuffix("_backup.csv") + ".csv"
+                                            val originalFile = File(dir, originalName)
+                                            backup.copyTo(originalFile, overwrite = true)
+                                        }
+                                        // 変更: ② アプリ再起動
+                                        val intent = android.content.Intent(this, CameraActivity::class.java).apply {
+                                            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                                                    android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
+                                        }
+                                        startActivity(intent)
+                                    }
+                                    .setNegativeButton("キャンセル", null)
+                                    .show()
+                            }
+                        }
+                    }
                 }
-                .setNegativeButton("キャンセル", null)
                 .show()
             true
         }
+        // 変更ここまで
 
         // 変更: スリープ機能無効化
 
