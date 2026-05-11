@@ -29,58 +29,17 @@ class CsvFileManager(private val context: Activity) {
         }
 
         val fileNames = csvFiles.map { it.name }.toTypedArray()
-        // 変更: チェック状態管理用BooleanArray
-        val checkedItems = BooleanArray(csvFiles.size) { false }
 
         val builder = AlertDialog.Builder(context)
         builder.setTitle("CSVファイル一覧")
-
-        // 変更: setAdapter → setMultiChoiceItems（タップでチェックON/OFF）
-        builder.setMultiChoiceItems(fileNames, checkedItems) { _, which, isChecked ->
-            checkedItems[which] = isChecked
-        }
-
-        // 変更: 削除ボタン（null指定でsetOnShowListener内で上書きし自動dismissを防ぐ）
-        builder.setPositiveButton("削除", null)
-
-        // 変更: キャンセルボタン
-        builder.setNegativeButton("キャンセル", null)
+        builder.setItems(fileNames, null)
+        builder.setNegativeButton("閉じる", null)
 
         val dialog = builder.create()
 
         dialog.setOnShowListener {
-            // 変更: 削除ボタンのクリック処理（0件選択時はダイアログを閉じない）
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val selectedFiles = csvFiles.filterIndexed { i, _ -> checkedItems[i] }
-                if (selectedFiles.isEmpty()) {
-                    Toast.makeText(context, "ファイルを選択してください", Toast.LENGTH_SHORT).show()
-                } else {
-                    AlertDialog.Builder(context)
-                        .setTitle("削除確認")
-                        .setMessage("${selectedFiles.size}件のファイルを削除しますか？")
-                        .setPositiveButton("削除") { _, _ ->
-                            selectedFiles.forEach { it.delete() }
-                            Toast.makeText(context, "${selectedFiles.size}件削除しました", Toast.LENGTH_SHORT).show()
-                            dialog.dismiss()
-                            context.findViewById<ImageButton>(R.id.openCsvImageButton).performClick()
-                        }
-                        .setNegativeButton("キャンセル", null)
-                        .show()
-                }
-            }
-
-            // 変更: タップでチェックON/OFF（setMultiChoiceItems使用時の確実な動作保証）
+            // 単押し：1件操作メニュー
             dialog.listView.setOnItemClickListener { _, _, position, _ ->
-                checkedItems[position] = !checkedItems[position]
-                dialog.listView.setItemChecked(position, checkedItems[position])
-            }
-
-            // 長押し：1件操作メニュー（既存のまま）
-            dialog.listView.setOnItemLongClickListener { _, _, position, _ ->
-                // 変更: 長押し時にチェックが入らないようにリセット
-                dialog.listView.setItemChecked(position, false)
-                checkedItems[position] = false
-
                 val fileTarget = csvFiles[position]
                 val items = arrayOf("開く", "ダウンロードへコピー", "共有", "削除", "キャンセル")
 
@@ -118,7 +77,59 @@ class CsvFileManager(private val context: Activity) {
                         }
                     }
                     .show()
+            }
+
+            // 長押し：チェックボックス付き一括削除ダイアログを直接開く
+            dialog.listView.setOnItemLongClickListener { _, _, position, _ ->
+                dialog.dismiss()
+                showBatchDeleteDialog()
                 true
+            }
+        }
+
+        dialog.show()
+    }
+
+    private fun showBatchDeleteDialog() {
+        val csvDir = context.getExternalFilesDir("ResultReader")
+        val csvFiles = csvDir?.listFiles { file -> file.extension == "csv" } ?: emptyArray()
+
+        if (csvFiles.isEmpty()) {
+            Toast.makeText(context, "保存されたCSVが見つかりません", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val fileNames = csvFiles.map { it.name }.toTypedArray()
+        val checkedItems = BooleanArray(csvFiles.size) { false }
+
+        val builder = AlertDialog.Builder(context)
+        builder.setTitle("まとめて削除")
+        builder.setMultiChoiceItems(fileNames, checkedItems) { _, which, isChecked ->
+            checkedItems[which] = isChecked
+        }
+        builder.setPositiveButton("削除", null)
+        builder.setNegativeButton("キャンセル", null)
+
+        val dialog = builder.create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val selectedFiles = csvFiles.filterIndexed { i, _ -> checkedItems[i] }
+                if (selectedFiles.isEmpty()) {
+                    Toast.makeText(context, "ファイルを選択してください", Toast.LENGTH_SHORT).show()
+                } else {
+                    AlertDialog.Builder(context)
+                        .setTitle("削除確認")
+                        .setMessage("${selectedFiles.size}件のファイルを削除しますか？")
+                        .setPositiveButton("削除") { _, _ ->
+                            selectedFiles.forEach { it.delete() }
+                            Toast.makeText(context, "${selectedFiles.size}件削除しました", Toast.LENGTH_SHORT).show()
+                            dialog.dismiss()
+                            context.findViewById<ImageButton>(R.id.openCsvImageButton).performClick()
+                        }
+                        .setNegativeButton("キャンセル", null)
+                        .show()
+                }
             }
         }
 
