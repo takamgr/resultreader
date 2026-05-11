@@ -194,23 +194,47 @@ object CsvExporter {
         }
 
         // 14) クラス内ランク計算（絶対領域・手を加えない）
-        fun assignClassRank(index: Int, scoreGetter: (List<String>) -> Int?) {
+        fun countScore(row: List<String>, secIdxList: List<Int>, value: Int): Int =  // 変更
+            secIdxList.count { row.getOrNull(it)?.trim()?.toIntOrNull() == value }
+
+        fun assignClassRank(index: Int, gIdx: Int, cIdx: Int, secIdxList: List<Int>, scoreGetter: (List<String>) -> Int?) {  // 変更
             val classGroups = rows.groupBy { it.getOrNull(2) ?: "?" }
             for ((clazz, group) in classGroups) {
                 if (clazz.isBlank() || clazz == "?") continue
-                if (clazz == "SP") continue  // 変更：賞典外クラスの識別子をSPに変更
-                group
+                if (clazz == "SP") continue
+                val sorted = group
                     .mapNotNull { row -> scoreGetter(row)?.let { score -> row to score } }
                     .sortedWith(
-                        compareBy({ it.second }, { -((it.first.getOrNull(acIndex)?.toIntOrNull()) ?: 0) })
+                        compareBy(
+                            { it.second },
+                            { -((it.first.getOrNull(cIdx)?.toIntOrNull()) ?: 0) },
+                            { -countScore(it.first, secIdxList, 1) },  // 変更
+                            { -countScore(it.first, secIdxList, 2) },  // 変更
+                            { -countScore(it.first, secIdxList, 3) }   // 変更
+                        )
                     )
-                    .forEachIndexed { i, (r, _) -> r[index] = (i + 1).toString() }
+                var rank = 1  // 変更
+                sorted.forEachIndexed { i, (r, _) ->  // 変更
+                    if (i == 0) {  // 変更
+                        r[index] = rank.toString()  // 変更
+                    } else {  // 変更
+                        val prev = sorted[i - 1].first  // 変更
+                        val curr = r  // 変更
+                        val same = scoreGetter(prev) == scoreGetter(curr) &&  // 変更
+                            prev.getOrNull(cIdx)?.toIntOrNull() == curr.getOrNull(cIdx)?.toIntOrNull() &&  // 変更
+                            countScore(prev, secIdxList, 1) == countScore(curr, secIdxList, 1) &&  // 変更
+                            countScore(prev, secIdxList, 2) == countScore(curr, secIdxList, 2) &&  // 変更
+                            countScore(prev, secIdxList, 3) == countScore(curr, secIdxList, 3)  // 変更
+                        if (!same) rank = i + 1  // 変更
+                        r[index] = rank.toString()  // 変更
+                    }  // 変更
+                }  // 変更
             }
         }
 
-        assignClassRank(amRankIndex) { it.getOrNull(agIndex)?.toIntOrNull() }
-        assignClassRank(pmRankIndex) { it.getOrNull(pgIndex)?.toIntOrNull() }
-        assignClassRank(totalRankIndex) { it.getOrNull(totalGIndex)?.toIntOrNull() }
+        assignClassRank(amRankIndex, agIndex, acIndex, amSecIndices) { it.getOrNull(agIndex)?.toIntOrNull() }  // 変更
+        assignClassRank(pmRankIndex, pgIndex, pcIndex, pmSecIndices) { it.getOrNull(pgIndex)?.toIntOrNull() }  // 変更
+        assignClassRank(totalRankIndex, totalGIndex, totalCIndex, secIndices) { it.getOrNull(totalGIndex)?.toIntOrNull() }  // 変更
 
         // 15) DNF/DNS 行は「トータルランク」だけラベル表示（計算には使わない）
         if (isDnfOrDns) {
