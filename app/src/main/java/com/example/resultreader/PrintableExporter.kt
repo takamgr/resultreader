@@ -49,8 +49,8 @@ object PrintableExporter {
     // ───────── CSV（S1見出し） ─────────
 
     /** 共有/Excel用：ヘッダだけ Sec##→S# へ変換したCSVを Downloads/ResultReader に保存 */
-    fun exportS1CsvToDownloads(context: Context, pattern: TournamentPattern): Uri? {
-        val src = resultCsvFile(context, pattern)
+    fun exportS1CsvToDownloads(context: Context, pattern: TournamentPattern, srcFile: File? = null): Uri? {
+        val src = srcFile ?: resultCsvFile(context, pattern)
         if (!src.exists()) {
             Toast.makeText(context, "本日のCSVが見つかりません", Toast.LENGTH_SHORT)
                 .show(); return null
@@ -70,8 +70,8 @@ object PrintableExporter {
     }
 
     // ───────── ノルバ用CSV出力 ─────────
-    fun exportNolubaCsvToDownloads(context: Context, pattern: TournamentPattern): Uri? {
-        val src = resultCsvFile(context, pattern)
+    fun exportNolubaCsvToDownloads(context: Context, pattern: TournamentPattern, srcFile: File? = null): Uri? {
+        val src = srcFile ?: resultCsvFile(context, pattern)
         if (!src.exists()) {
             Toast.makeText(context, "本日のCSVが見つかりません", Toast.LENGTH_SHORT).show()
             return null
@@ -154,7 +154,10 @@ object PrintableExporter {
             }
         }
 
-        val name = "noluba_${pattern.patternCode}_${todayName()}.csv"
+        val dateStr = srcFile?.let {
+            Regex("_(\\d{8})\\.csv$").find(it.name)?.groupValues?.get(1)
+        } ?: todayName()
+        val name = "noluba_${pattern.patternCode}_$dateStr.csv"
         return writeToDownloads(context, name, "text/csv", outLines.joinToString("\n").toByteArray(Charsets.UTF_8))
     }
 
@@ -820,9 +823,10 @@ object PrintableExporter {
     fun exportPrintablePdfStyledSplitByClass(
         context: Context,
         pattern: TournamentPattern,
-        rowsPerPage: Int = 20
+        rowsPerPage: Int = 20,
+        srcFile: File? = null
     ) {
-        val src = File(
+        val src = srcFile ?: File(
             context.getExternalFilesDir("ResultReader"),
             "result_${pattern.patternCode}_${todayName()}.csv"
         )

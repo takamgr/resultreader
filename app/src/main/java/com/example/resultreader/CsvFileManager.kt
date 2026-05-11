@@ -41,7 +41,7 @@ class CsvFileManager(private val context: Activity) {
             // 単押し：1件操作メニュー
             dialog.listView.setOnItemClickListener { _, _, position, _ ->
                 val fileTarget = csvFiles[position]
-                val items = arrayOf("開く", "ダウンロードへコピー", "共有", "削除", "キャンセル")
+                val items = arrayOf("開く", "ダウンロードへコピー", "共有", "出力する", "削除", "キャンセル")
 
                 AlertDialog.Builder(context)
                     .setTitle(fileTarget.name)
@@ -58,6 +58,23 @@ class CsvFileManager(private val context: Activity) {
                             }
                             2 -> shareCsvFile(fileTarget)
                             3 -> {
+                                val patternCode = Regex("^result_([^_]+)_\\d{8}\\.csv$")
+                                    .find(fileTarget.name)?.groupValues?.get(1)
+                                val pattern = when (patternCode) {
+                                    "4x2" -> TournamentPattern.PATTERN_4x2
+                                    "5x2" -> TournamentPattern.PATTERN_5x2
+                                    "4x3" -> TournamentPattern.PATTERN_4x3
+                                    else -> null
+                                }
+                                if (pattern == null) {
+                                    Toast.makeText(context, "パターンを特定できないファイルです", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    dialog.dismiss()
+                                    val anchor = context.findViewById<View>(R.id.openCsvImageButton)
+                                    showExportPopupMenu(anchor, pattern, srcFile = fileTarget)
+                                }
+                            }
+                            4 -> {
                                 AlertDialog.Builder(context)
                                     .setTitle("削除確認")
                                     .setMessage("「${fileTarget.name}」を削除しますか？")
@@ -136,47 +153,37 @@ class CsvFileManager(private val context: Activity) {
         dialog.show()
     }
 
-    fun showExportPopupMenu(anchor: View, selectedPattern: TournamentPattern) {
+    fun showExportPopupMenu(anchor: View, selectedPattern: TournamentPattern, srcFile: File? = null) {
         val popup = PopupMenu(context, anchor)
 
         popup.menu.add(0, 3, 2, "CSVを保存")
         popup.menu.add(0, 6, 3, "ノルバ用CSVを保存")  // 変更
         popup.menu.add(0, 5, 4, "PDFを保存（Canvas）")
-        // optional: popup.menu.add(0, 4, 3, "PDFを開く/印刷")
 
         popup.setOnMenuItemClickListener { item ->
              when (item.itemId) {
                 1 -> {
-                    // S1版CSV（HTML path removed; keep S1 CSV)
-                    PrintableExporter.exportS1CsvToDownloads(context, selectedPattern)
+                    PrintableExporter.exportS1CsvToDownloads(context, selectedPattern, srcFile)
                     true
                 }
                 2 -> {
-
-                    // Canvas unified PDF (per-class single page behavior folded into unified renderer)
-                    PrintableExporter.exportPrintablePdfStyledSplitByClass(context, selectedPattern, rowsPerPage = 20)
+                    PrintableExporter.exportPrintablePdfStyledSplitByClass(context, selectedPattern, rowsPerPage = 20, srcFile = srcFile)
                     true
                 }
-
-
-
                 5 -> {
-                    // Canvas PDF with per-row thin lines enabled for visual verification
-                    PrintableExporter.exportPrintablePdfStyledSplitByClass(context, selectedPattern, rowsPerPage = 20)
+                    PrintableExporter.exportPrintablePdfStyledSplitByClass(context, selectedPattern, rowsPerPage = 20, srcFile = srcFile)
                     true
                 }
-
                 3 -> {
-                    PrintableExporter.exportS1CsvToDownloads(context, selectedPattern)
+                    PrintableExporter.exportS1CsvToDownloads(context, selectedPattern, srcFile)
                     true
                 }
                 4 -> {
-                    // legacy: map to unified Canvas exporter
-                    PrintableExporter.exportPrintablePdfStyledSplitByClass(context, selectedPattern, rowsPerPage = 20)
+                    PrintableExporter.exportPrintablePdfStyledSplitByClass(context, selectedPattern, rowsPerPage = 20, srcFile = srcFile)
                     true
                 }
                 6 -> {
-                    PrintableExporter.exportNolubaCsvToDownloads(context, selectedPattern)  // 変更
+                    PrintableExporter.exportNolubaCsvToDownloads(context, selectedPattern, srcFile)  // 変更
                     true
                 }
                  else -> false
