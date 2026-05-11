@@ -129,8 +129,8 @@ class CsvFileManager(private val context: Activity) {
         val popup = PopupMenu(context, anchor)
 
         popup.menu.add(0, 3, 2, "CSVを保存")
-        // Canvasベースの安定版PDF出力を追加
-        popup.menu.add(0, 5, 3, "PDFを保存（Canvas）")
+        popup.menu.add(0, 6, 3, "ノルバ用CSVを保存")  // 変更
+        popup.menu.add(0, 5, 4, "PDFを保存（Canvas）")
         // optional: popup.menu.add(0, 4, 3, "PDFを開く/印刷")
 
         popup.setOnMenuItemClickListener { item ->
@@ -162,6 +162,10 @@ class CsvFileManager(private val context: Activity) {
                 4 -> {
                     // legacy: map to unified Canvas exporter
                     PrintableExporter.exportPrintablePdfStyledSplitByClass(context, selectedPattern, rowsPerPage = 20)
+                    true
+                }
+                6 -> {
+                    PrintableExporter.exportNolubaCsvToDownloads(context, selectedPattern)  // 変更
                     true
                 }
                  else -> false

@@ -69,6 +69,95 @@ object PrintableExporter {
         return writeToDownloads(context, name, "text/csv", outText.toByteArray(Charsets.UTF_8))
     }
 
+    // ───────── ノルバ用CSV出力 ─────────
+    fun exportNolubaCsvToDownloads(context: Context, pattern: TournamentPattern): Uri? {
+        val src = resultCsvFile(context, pattern)
+        if (!src.exists()) {
+            Toast.makeText(context, "本日のCSVが見つかりません", Toast.LENGTH_SHORT).show()
+            return null
+        }
+
+        val lines = src.readLines(Charsets.UTF_8)
+        if (lines.isEmpty()) return null
+
+        val headerRaw = lines.first().split(",").map { it.trim().removePrefix("﻿") }
+        val rows = lines.drop(1).map { it.split(",") }
+
+        // パターン別セクション数（1セッションあたり）
+        val secsPerSession = when (pattern) {
+            TournamentPattern.PATTERN_4x2 -> 8
+            TournamentPattern.PATTERN_5x2 -> 10
+            TournamentPattern.PATTERN_4x3 -> 12
+        }
+
+        // ヘッダインデックス
+        val entryNoIdx = headerRaw.indexOf("EntryNo")
+        val nameIdx = headerRaw.indexOf("Name")
+        val classIdx = headerRaw.indexOf("Class")
+        val totalGIdx = headerRaw.indexOf("TotalG")
+        val totalCIdx = headerRaw.indexOf("TotalC")
+        val totalRankIdx = headerRaw.indexOf("TotalRank")
+        val amGIdx = headerRaw.indexOf("AmG")
+        val pmGIdx = headerRaw.indexOf("PmG")
+        val secRegex = Regex("^Sec(\\d{2})$")
+        val secIndices = headerRaw.mapIndexedNotNull { i, h ->
+            if (secRegex.matches(h)) i else null
+        }
+
+        // クラス順
+        val prefs = context.getSharedPreferences("ResultReaderPrefs", Context.MODE_PRIVATE)
+        val order = when (prefs.getString("tournamentType", "beginner")) {
+            "championship" -> listOf("IA", "IB", "NA", "NB")
+            else -> listOf("オープン", "ビギナー")
+        }
+        val grouped = rows.groupBy { it.getOrNull(classIdx)?.trim() ?: "" }
+        val classes = buildList {
+            addAll(order)
+            addAll(grouped.keys.filter { it.isNotBlank() && it !in order }.sorted())
+        }
+
+        // ノルバCSVヘッダ（S1〜Sn はセッションあたりのセクション数）
+        val secLabels = (1..secsPerSession).map { "S$it" }
+        val nolubaHeader = listOf("順位", "エントリーNo", "名前", "Lap") +
+            secLabels + listOf("G", "G計", "C計")
+
+        val outLines = mutableListOf<String>()
+        outLines.add("﻿" + nolubaHeader.joinToString(","))
+
+        classes.forEach { clazz ->
+            val group = grouped[clazz].orEmpty()
+            if (group.isEmpty()) return@forEach
+
+            // 空行でクラス区切り
+            if (outLines.size > 1) outLines.add("")
+
+            group.forEach { row ->
+                val entryNo = row.getOrNull(entryNoIdx)?.trim() ?: ""
+                val name = row.getOrNull(nameIdx)?.trim() ?: ""
+                val totalG = row.getOrNull(totalGIdx)?.trim() ?: ""
+                val totalC = row.getOrNull(totalCIdx)?.trim() ?: ""
+                val rank = row.getOrNull(totalRankIdx)?.trim() ?: ""
+
+                // AM Lap（Lap1）
+                val amScores = secIndices.take(secsPerSession).map { row.getOrNull(it)?.trim() ?: "" }
+                val amG = row.getOrNull(amGIdx)?.trim() ?: ""
+                val lap1Line = listOf(rank, entryNo, name, "1") +
+                    amScores + listOf(amG, totalG, totalC)
+                outLines.add(lap1Line.joinToString(","))
+
+                // PM Lap（Lap2）
+                val pmScores = secIndices.drop(secsPerSession).take(secsPerSession).map { row.getOrNull(it)?.trim() ?: "" }
+                val pmG = row.getOrNull(pmGIdx)?.trim() ?: ""
+                val lap2Line = listOf("", "", "", "2") +
+                    pmScores + listOf(pmG, "", "")
+                outLines.add(lap2Line.joinToString(","))
+            }
+        }
+
+        val name = "noluba_${pattern.patternCode}_${todayName()}.csv"
+        return writeToDownloads(context, name, "text/csv", outLines.joinToString("\n").toByteArray(Charsets.UTF_8))
+    }
+
     // ───────── HTML（掲示用） ─────────
 
     /** 掲示用：クラスごとに区切り、不要列除外、日本語＋S1見出し、ヘッダ（大会名＋日付）付きでHTML保存 */
