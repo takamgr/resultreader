@@ -68,9 +68,19 @@ class ResultChecker(private val context: Context) {
             }
 
             // ■ AM完全同点グループ検出（DNSは除外）
+            val headerForSec = header
+            val secRegex = Regex("^Sec\\d{2}$")
+            val amSecIndices = headerForSec.mapIndexedNotNull { i, h ->
+                if (secRegex.matches(h) && headerForSec.indexOf("AmG").let { ag -> i < ag }) i else null
+            }  // 変更
+            fun countScoreAm(row: List<String>, value: Int): Int =
+                amSecIndices.count { row.getOrNull(it)?.trim()?.toIntOrNull() == value }  // 変更
+
             val amGroups = rows
                 .filter { it.getOrNull(inputIdx) != "DNS" }
-                .groupBy { row -> "${row.getOrNull(amGIdx)}_${row.getOrNull(amCIdx)}" }
+                .groupBy { row ->
+                    "${row.getOrNull(amGIdx)}_${row.getOrNull(amCIdx)}_${countScoreAm(row, 1)}_${countScoreAm(row, 2)}_${countScoreAm(row, 3)}"  // 変更
+                }
                 .filter { (_, group) ->
                     group.size > 1 && group.firstOrNull()?.getOrNull(amGIdx)?.isNullOrBlank() == false
                 }
@@ -236,9 +246,19 @@ class ResultChecker(private val context: Context) {
             }
 
             // ■ Total完全同点（DNS除外）
+            val headerForSec2 = header
+            val secRegex2 = Regex("^Sec\\d{2}$")
+            val allSecIndices = headerForSec2.mapIndexedNotNull { i, h ->
+                if (secRegex2.matches(h)) i else null
+            }  // 変更
+            fun countScoreTotal(row: List<String>, value: Int): Int =
+                allSecIndices.count { row.getOrNull(it)?.trim()?.toIntOrNull() == value }  // 変更
+
             val totalGroups = rows
                 .filter { it.getOrNull(inputIdx) != "DNS" }
-                .groupBy { row -> "${row.getOrNull(totalGIdx)}_${row.getOrNull(totalCIdx)}" }
+                .groupBy { row ->
+                    "${row.getOrNull(totalGIdx)}_${row.getOrNull(totalCIdx)}_${countScoreTotal(row, 1)}_${countScoreTotal(row, 2)}_${countScoreTotal(row, 3)}"  // 変更
+                }
                 .filter { (_, group) ->
                     group.size > 1 && group.firstOrNull()?.getOrNull(totalGIdx)?.isNullOrBlank() == false
                 }
